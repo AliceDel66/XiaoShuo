@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { PremiseCard } from "@shared/types";
 import type { WorkbenchHookResult } from "../types";
 import { WORKFLOW_ACTION_LABELS } from "../view-model";
@@ -24,6 +24,76 @@ const dashboardActions = [
   "generate-volume-outline",
   "generate-chapter-outline"
 ] as const;
+
+function VolumeChapterControls({ state, actions }: Pick<WorkbenchHookResult, "state" | "actions">) {
+  const volumeOutline = useMemo(
+    () => state.selectedProject?.outlines.find(
+      (o) => o.level === "volume" && o.volumeNumber === state.workflowDraft.volumeNumber
+    ),
+    [state.selectedProject?.outlines, state.workflowDraft.volumeNumber]
+  );
+
+  const existingCount = useMemo(
+    () => state.selectedProject?.outlines.filter(
+      (o) => o.level === "chapter" && o.volumeNumber === state.workflowDraft.volumeNumber
+    ).length ?? 0,
+    [state.selectedProject?.outlines, state.workflowDraft.volumeNumber]
+  );
+
+  const volumePlanned = volumeOutline?.chapterCount ?? 0;
+  const remaining = volumePlanned > 0 ? volumePlanned - existingCount : 0;
+  const maxChapterCount = volumePlanned > 0 ? Math.max(1, remaining) : 30;
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Field label="目标卷号">
+        <Input
+          type="number"
+          min={1}
+          value={state.workflowDraft.volumeNumber}
+          onChange={(event) =>
+            actions.setWorkflowDraft((current) => ({
+              ...current,
+              volumeNumber: Number(event.target.value || 1)
+            }))
+          }
+        />
+      </Field>
+      <Field label={volumePlanned > 0 ? `章纲一次生成章数 (剩余${remaining})` : "章纲一次生成章数"}>
+        <Input
+          type="number"
+          min={1}
+          max={maxChapterCount}
+          value={Math.min(state.workflowDraft.chapterCount, maxChapterCount)}
+          onChange={(event) =>
+            actions.setWorkflowDraft((current) => ({
+              ...current,
+              chapterCount: Math.max(1, Math.min(maxChapterCount, Number(event.target.value || 5)))
+            }))
+          }
+        />
+      </Field>
+    </div>
+  );
+}
+
+function VolumeChapterInfo({ state }: Pick<WorkbenchHookResult, "state">) {
+  const volumeOutline = state.selectedProject?.outlines.find(
+    (o) => o.level === "volume" && o.volumeNumber === state.workflowDraft.volumeNumber
+  );
+  const existingCount = state.selectedProject?.outlines.filter(
+    (o) => o.level === "chapter" && o.volumeNumber === state.workflowDraft.volumeNumber
+  ).length ?? 0;
+  const volumePlanned = volumeOutline?.chapterCount ?? 0;
+
+  return (
+    <div className="text-xs text-slate-500">
+      第 {state.workflowDraft.volumeNumber} 卷已有章纲 {existingCount} 章
+      {volumePlanned > 0 ? `（卷纲规定 ${volumePlanned} 章，剩余 ${Math.max(0, volumePlanned - existingCount)} 章）` : "（卷纲未指定章数）"}，
+      下次生成将从第 {existingCount + 1} 章开始
+    </div>
+  );
+}
 
 function PremiseCardSummary({ premiseCard }: { premiseCard: PremiseCard }) {
   return (
@@ -261,35 +331,7 @@ export function DashboardCards({ state, actions }: WorkbenchHookResult) {
           action={<StatusPill tone="info">{state.selectedProject?.manifest.workflowMode === "strict" ? "严格流" : "自由流"}</StatusPill>}
         />
         <div className="space-y-4 p-5">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="目标卷号">
-              <Input
-                type="number"
-                min={1}
-                value={state.workflowDraft.volumeNumber}
-                onChange={(event) =>
-                  actions.setWorkflowDraft((current) => ({
-                    ...current,
-                    volumeNumber: Number(event.target.value || 1)
-                  }))
-                }
-              />
-            </Field>
-            <Field label="章纲一次生成章数">
-              <Input
-                type="number"
-                min={1}
-                max={30}
-                value={state.workflowDraft.chapterCount}
-                onChange={(event) =>
-                  actions.setWorkflowDraft((current) => ({
-                    ...current,
-                    chapterCount: Math.max(1, Math.min(30, Number(event.target.value || 5)))
-                  }))
-                }
-              />
-            </Field>
-          </div>
+          <VolumeChapterControls state={state} actions={actions} />
           <Field label="工作流备注">
             <Textarea
               rows={2}
@@ -316,10 +358,7 @@ export function DashboardCards({ state, actions }: WorkbenchHookResult) {
             ))}
           </div>
           {state.selectedProject ? (
-            <div className="text-xs text-slate-500">
-              已有章纲 {state.selectedProject.outlines.filter(o => o.level === "chapter").length} 章，
-              下次生成将从第 {state.selectedProject.outlines.filter(o => o.level === "chapter" && o.volumeNumber === state.workflowDraft.volumeNumber).length + 1} 章开始
-            </div>
+            <VolumeChapterInfo state={state} />
           ) : null}
         </div>
       </ShellPanel>

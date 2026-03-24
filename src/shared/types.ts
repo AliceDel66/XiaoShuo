@@ -240,6 +240,7 @@ export interface OutlinePacket {
   children: string[];
   chapterNumber?: number;
   volumeNumber?: number;
+  chapterCount?: number;
 }
 
 export interface StateChangeEntry {

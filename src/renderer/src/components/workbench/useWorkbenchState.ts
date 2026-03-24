@@ -396,7 +396,16 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
       }
 
       if (action === "generate-chapter-outline") {
-        input.chapterCount = nextDraft.chapterCount;
+        // Constrain chapterCount by volume outline's planned chapter count
+        const targetVolumeOutline = selectedProject.outlines.find(
+          (o) => o.level === "volume" && o.volumeNumber === nextDraft.volumeNumber
+        );
+        const volumePlannedChapters = targetVolumeOutline?.chapterCount ?? 0;
+        const existingChaptersForVolume = selectedProject.outlines.filter(
+          (o) => o.level === "chapter" && o.volumeNumber === nextDraft.volumeNumber
+        ).length;
+        const remaining = volumePlannedChapters > 0 ? volumePlannedChapters - existingChaptersForVolume : nextDraft.chapterCount;
+        input.chapterCount = Math.max(1, Math.min(nextDraft.chapterCount, remaining > 0 ? remaining : nextDraft.chapterCount));
       }
 
       if (action === "generate-volume-outline") {

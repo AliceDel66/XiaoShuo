@@ -633,23 +633,34 @@ function buildPromptPayload(
     case "generate-volume-outline":
       sections.push(
         '⚠️ 重要：每卷的 summary、goal、conflict 必须直接引用资料库中的角色名、势力名和主线矛盾，卷与卷之间必须形成因果递进关系。',
+        '⚠️ 重要：每卷必须明确指定 chapterCount（该卷计划的章节数），通常每卷 15-25 章，根据内容密度合理分配。',
         `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
         `资料库: ${JSON.stringify(snapshot.storyBible)}`,
-        'JSON schema: [{"id": string, "level": "volume", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "volumeNumber": number}]'
+        'JSON schema: [{"id": string, "level": "volume", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "chapterCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "volumeNumber": number}]'
       );
       break;
-    case "generate-chapter-outline":
+    case "generate-chapter-outline": {
+      const targetVolNumber = input.volumeNumber ?? 1;
+      const targetVolumeOutline = snapshot.outlines.find((o) => o.level === "volume" && o.volumeNumber === targetVolNumber);
+      const volumePlannedChapters = targetVolumeOutline?.chapterCount ?? 0;
+      const existingChaptersForVolume = snapshot.outlines.filter((o) => o.level === "chapter" && o.volumeNumber === targetVolNumber);
+      const remainingChapters = volumePlannedChapters > 0 ? volumePlannedChapters - existingChaptersForVolume.length : (input.chapterCount ?? 5);
+      const effectiveCount = Math.max(1, Math.min(input.chapterCount ?? remainingChapters, remainingChapters > 0 ? remainingChapters : (input.chapterCount ?? 5)));
       sections.push(
         '⚠️ 重要：章纲中的角色名、地点、冲突必须与资料库严格一致。每章的 goal 和 conflict 必须能追溯到卷纲和立项卡的主线矛盾。',
-        `目标卷号: ${input.volumeNumber ?? 1}`,
-        `本次生成章数: ${input.chapterCount ?? 5}`,
+        `目标卷号: ${targetVolNumber}`,
+        volumePlannedChapters > 0 ? `该卷计划总章数: ${volumePlannedChapters}` : '',
+        `该卷已有章纲数: ${existingChaptersForVolume.length}`,
+        `本次需要生成章数: ${effectiveCount}`,
         `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
         `资料库: ${JSON.stringify(snapshot.storyBible)}`,
-        `既有章纲: ${JSON.stringify(snapshot.outlines.filter((item) => item.level === "chapter"))}`,
-        '请从既有章纲之后继续生成，章节号接续已有的最后一章。',
+        `目标卷纲: ${JSON.stringify(targetVolumeOutline ?? null)}`,
+        `该卷既有章纲: ${JSON.stringify(existingChaptersForVolume)}`,
+        `请从既有章纲之后继续生成，章节号接续该卷已有的最后一章。严格生成 ${effectiveCount} 章，不要重复已有章节。`,
         'JSON schema: [{"id": string, "level": "chapter", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "chapterNumber": number, "volumeNumber": number}]'
       );
       break;
+    }
     case "write-scene":
     case "write-chapter":
       sections.push(
