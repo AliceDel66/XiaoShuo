@@ -61,6 +61,7 @@ export interface DatabaseEntityRecord {
 export interface WorkflowDraftState {
   volumeNumber: number;
   chapterNumber: number;
+  chapterCount: number;
   scope: ChunkScope;
   notes: string;
 }

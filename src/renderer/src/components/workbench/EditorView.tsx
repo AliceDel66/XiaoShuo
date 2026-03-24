@@ -303,7 +303,7 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
             <div className="space-y-4">
               <Field label="工作流备注">
                 <Textarea
-                  rows={4}
+                  rows={2}
                   value={state.workflowDraft.notes}
                   onChange={(event) =>
                     setWorkflowDraft((current) => ({
@@ -316,7 +316,7 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
               </Field>
               <div className="grid grid-cols-2 gap-2">
                 <SecondaryButton
-                  disabled={!selectedChapter}
+                  disabled={!selectedChapter || Boolean(state.activeJob)}
                   onClick={() =>
                     selectedChapter &&
                     void startWorkflow("write-scene", {
@@ -329,7 +329,7 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
                   写场景
                 </SecondaryButton>
                 <PrimaryButton
-                  disabled={!selectedChapter}
+                  disabled={!selectedChapter || Boolean(state.activeJob)}
                   onClick={() =>
                     selectedChapter &&
                     void startWorkflow("write-chapter", {
@@ -342,14 +342,84 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
                   写章节
                 </PrimaryButton>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <SecondaryButton disabled={!state.activePreviewSession} onClick={() => void regenerateCandidate()}>
-                  重生成
-                </SecondaryButton>
-                <SecondaryButton disabled={!state.selectedCandidate} onClick={() => void confirmCandidate(state.selectedCandidate!.candidateId)}>
-                  确认候选
-                </SecondaryButton>
-              </div>
+
+              {/* Generation progress */}
+              {state.activeJob ? (
+                <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/5 p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-cyan-400">生成进度</div>
+                    <StatusPill tone="info">{state.activeJob.progress.percent}%</StatusPill>
+                  </div>
+                  <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-cyan-400 transition-all duration-300"
+                      style={{ width: `${state.activeJob.progress.percent}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-slate-400">{state.activeJob.progress.message}</div>
+                </div>
+              ) : null}
+
+              {/* Candidate preview & actions */}
+              {previewCandidate ? (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-white/8 bg-[#0d1018] p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="text-sm font-medium text-slate-200">{previewCandidate.displayTitle}</div>
+                      <StatusPill tone={state.activePreviewSession?.status === "confirmed" ? "success" : "neutral"}>
+                        {state.activePreviewSession?.status === "confirmed" ? "已同步" : "未保存"}
+                      </StatusPill>
+                    </div>
+                    <pre className="max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-400">
+                      {previewCandidate.renderedContent}
+                    </pre>
+                  </div>
+                  <PrimaryButton
+                    className="w-full justify-center"
+                    disabled={Boolean(state.activeJob) || state.activePreviewSession?.status === "confirmed"}
+                    onClick={() => void confirmCandidate(previewCandidate.candidateId)}
+                  >
+                    保存到正式文档
+                  </PrimaryButton>
+                  <div className="grid grid-cols-2 gap-2">
+                    <SecondaryButton disabled={Boolean(state.activeJob)} onClick={() => void regenerateCandidate()}>
+                      重生成
+                    </SecondaryButton>
+                    <GhostButton disabled={Boolean(state.activeJob)} onClick={() => void actions.discardSession()}>
+                      丢弃会话
+                    </GhostButton>
+                  </div>
+                  {/* Candidate list if multiple */}
+                  {(state.activePreviewSession?.candidates.length ?? 0) > 1 ? (
+                    <div className="space-y-1">
+                      <div className="text-xs text-slate-500">历史候选版本</div>
+                      {state.activePreviewSession?.candidates.map((c) => (
+                        <button
+                          key={c.candidateId}
+                          type="button"
+                          onClick={() => actions.setActiveCandidateId(c.candidateId)}
+                          className={cn(
+                            "w-full rounded-xl border px-3 py-2 text-left text-xs transition",
+                            c.candidateId === state.activeCandidateId
+                              ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-200"
+                              : "border-white/6 text-slate-400 hover:bg-white/5"
+                          )}
+                        >
+                          {c.displayTitle}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : state.activePreviewSession?.status === "failed" ? (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+                  <div className="text-xs font-semibold text-red-400">生成失败</div>
+                  <div className="mt-1 text-xs text-slate-400">{state.activePreviewSession.errorMessage ?? "未知错误"}</div>
+                </div>
+              ) : !state.activeJob ? (
+                <EmptyState title="在上方点击写场景/写章节" detail="生成进度和候选预览会在这里展示，可直接重生成或保存。" />
+              ) : null}
+
               <div className="grid grid-cols-2 gap-2">
                 <GhostButton disabled={!state.activePreviewSession} onClick={openPromptDrawer}>
                   查看 Prompt
@@ -358,15 +428,6 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
                   查看 Context
                 </GhostButton>
               </div>
-
-              {previewCandidate ? (
-                <div className="rounded-3xl border border-white/8 bg-[#0d1018] p-4">
-                  <div className="text-sm font-medium text-slate-200">当前候选预览</div>
-                  <p className="mt-2 line-clamp-6 text-sm leading-6 text-slate-400">{previewCandidate.renderedContent}</p>
-                </div>
-              ) : (
-                <EmptyState title="这里不做自由聊天" detail="右侧只承载现有 workflow、候选确认和 prompt/context 查看能力。" />
-              )}
             </div>
           </div>
         </aside>

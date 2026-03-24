@@ -45,14 +45,14 @@ describe("WorkbenchApp renderer", () => {
     expect(await screen.findByText("首选项")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("连载控制台"));
-    const writeChapterButton = await screen.findByRole("button", { name: "写章节" });
-    fireEvent.click(writeChapterButton);
+    const generateSetupButton = await screen.findByRole("button", { name: "生成立项" });
+    fireEvent.click(generateSetupButton);
 
     await waitFor(() => {
       expect(api.startGeneration).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: snapshot.manifest.projectId,
-          action: "write-chapter"
+          action: "generate-project-setup"
         })
       );
     });

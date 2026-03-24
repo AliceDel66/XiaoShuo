@@ -395,10 +395,15 @@ export class ProjectRepository {
         break;
       }
       case "chapter-outline": {
-        const chapterOutlines = readStructuredDocument<OutlinePacket[]>(document, snapshot.outlines.filter((item) => item.level === "chapter"));
+        const newChapterOutlines = readStructuredDocument<OutlinePacket[]>(document, []);
+        const existingChapters = snapshot.outlines.filter((item) => item.level === "chapter");
+        // Merge: keep existing chapters that are not overwritten by new ones
+        const newChapterNumbers = new Set(newChapterOutlines.map((o) => `${o.volumeNumber}-${o.chapterNumber}`));
+        const keptExisting = existingChapters.filter((o) => !newChapterNumbers.has(`${o.volumeNumber}-${o.chapterNumber}`));
         await this.saveOutlines(manifest.rootPath, [
           ...snapshot.outlines.filter((item) => item.level === "volume"),
-          ...chapterOutlines
+          ...keptExisting,
+          ...newChapterOutlines
         ]);
         manifest.currentStage = "outlining";
         break;

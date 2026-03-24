@@ -789,11 +789,12 @@ export function mockVolumeOutlines(snapshot: ProjectSnapshot): OutlinePacket[] {
 export function mockChapterOutlines(
   snapshot: ProjectSnapshot,
   volumeNumber: number,
-  referenceHints: ReferenceCorpusManifest[]
+  referenceHints: ReferenceCorpusManifest[],
+  chapterCount?: number
 ): OutlinePacket[] {
   const existing = snapshot.outlines.filter((item) => item.level === "chapter" && item.volumeNumber === volumeNumber);
   const start = existing.length + 1;
-  const total = 3;
+  const total = chapterCount ?? 3;
   return Array.from({ length: total }, (_, index) => {
     const chapterNumber = start + index;
     return {

@@ -231,7 +231,7 @@ export class WorkflowService {
         const result = await this.aiOrchestrator.executeJson({
           role: "plannerModel",
           promptTrace,
-          fallback: () => mockChapterOutlines(snapshot, input.volumeNumber ?? 1, referenceHints)
+          fallback: () => mockChapterOutlines(snapshot, input.volumeNumber ?? 1, referenceHints, input.chapterCount)
         });
         return {
           candidate: {
@@ -642,9 +642,11 @@ function buildPromptPayload(
       sections.push(
         '⚠️ 重要：章纲中的角色名、地点、冲突必须与资料库严格一致。每章的 goal 和 conflict 必须能追溯到卷纲和立项卡的主线矛盾。',
         `目标卷号: ${input.volumeNumber ?? 1}`,
+        `本次生成章数: ${input.chapterCount ?? 5}`,
         `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
         `资料库: ${JSON.stringify(snapshot.storyBible)}`,
         `既有章纲: ${JSON.stringify(snapshot.outlines.filter((item) => item.level === "chapter"))}`,
+        '请从既有章纲之后继续生成，章节号接续已有的最后一章。',
         'JSON schema: [{"id": string, "level": "chapter", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "chapterNumber": number, "volumeNumber": number}]'
       );
       break;

@@ -471,6 +471,7 @@ export interface WorkflowExecutionInput {
   chapterTitle?: string;
   chapterNumber?: number;
   volumeNumber?: number;
+  chapterCount?: number;
   scope?: ChunkScope;
   notes?: string;
   referenceCorpusIds?: string[];

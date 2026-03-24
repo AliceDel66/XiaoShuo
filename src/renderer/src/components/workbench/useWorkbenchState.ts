@@ -24,6 +24,7 @@ function defaultWorkflowDraft(): WorkflowDraftState {
   return {
     volumeNumber: 1,
     chapterNumber: 1,
+    chapterCount: 5,
     scope: "chapter",
     notes: ""
   };
@@ -392,6 +393,10 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
         input.chapterNumber = nextDraft.chapterNumber;
         input.chapterTitle = chapter?.title ?? `第${nextDraft.chapterNumber}章`;
         input.scope = nextDraft.scope;
+      }
+
+      if (action === "generate-chapter-outline") {
+        input.chapterCount = nextDraft.chapterCount;
       }
 
       if (action === "generate-volume-outline") {
