@@ -469,6 +469,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
             : current
         );
         setActiveCandidateId(candidateId);
+        setDrawer(null);
         pushNotice("候选版本已确认并写回正式文档。");
       } catch (confirmError) {
         setError(confirmError instanceof Error ? confirmError.message : String(confirmError));

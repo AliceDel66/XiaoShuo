@@ -79,4 +79,134 @@ export const DEFAULT_PROMPT_TEMPLATES: PromptTemplateMap = {
       "3. 场景数通常 2-4 个，每个场景承担不同的叙事功能。",
       "4. 新章纲的编号应紧接已有章纲，不要重复。",
       "5. 如有参考书的结构/语感分析，请参考其节奏密度和钩子策略。",
-      "请输出严格 JSON 数组，每个对象都是一个 Outlin
+      "请输出严格 JSON 数组，每个对象都是一个 OutlinePacket，不要附带 Markdown 代码块或额外解释。"
+    ].join("\n"),
+    ["请为指定卷生成章纲。", "{{payload}}"].join("\n")
+  ),
+  "write-scene": promptTemplate(
+    [
+      "你是一名专业的中文长篇网络小说作者，擅长用紧凑的场景推进节奏和塑造人物。",
+      "请根据章纲、资料库和参考语感，写出一个完整场景的正文。",
+      "写作要求：",
+      "1. 开场迅速切入冲突或行动，不要大段背景铺设。",
+      "2. 对话必须推进信息或关系，禁止无意义寒暄。每段对话后接动作、表情或心理反应。",
+      "3. 描写以功能性为主：环境描写服务于氛围和暗示，动作描写服务于节奏加速。",
+      "4. 场景结尾必须有钩子或悬念，吸引读者继续阅读。",
+      "5. 如提供了参考书的对话比例和叙事偏向，请尽量匹配该风格。",
+      "6. markdown 字段直接写正文，用 ## 标记场景标题，不要包含 YAML 或 JSON 格式。",
+      "请输出严格 JSON，不要附带 Markdown 代码块或额外解释。"
+    ].join("\n"),
+    ["请写一个场景草稿。", "{{payload}}"].join("\n")
+  ),
+  "write-chapter": promptTemplate(
+    [
+      "你是一名专业的中文长篇网络小说作者，擅长节奏控制、人物塑造和伏笔管理。",
+      "请根据章纲、资料库、近期草稿和参考语感，写出一章完整的正文。",
+      "写作要求：",
+      "1. 章首需在 200 字内建立本章核心冲突或悬念。",
+      "2. 每个场景承担不同功能：信息推进 / 关系变化 / 冲突升级 / 氛围铺垫。",
+      "3. 对话占比建议 25%-40%，对话必须有信息差或情感张力，杜绝无意义对话。",
+      "4. 避免上帝视角泄露悬念，保持信息差制造的紧张感。",
+      "5. 章末必须有钩子：可以是新信息、新危机、角色决断或反转暗示。",
+      "6. 全章字数建议 3000-5000 字（中文），节奏紧凑不灌水。",
+      "7. 如提供了参考书分析，请参考其段落长度、对话比例和叙事风格。",
+      "8. markdown 字段写完整章节正文，用 # 标记章节标题，## 标记场景分隔。不要包含 YAML。",
+      "9. 所有角色的行为必须符合资料库中的设定，不能出现设定外的能力或信息。",
+      "请输出严格 JSON，不要附带 Markdown 代码块或额外解释。"
+    ].join("\n"),
+    ["请写一个章节草稿。", "{{payload}}"].join("\n")
+  ),
+  "update-chapter-state": promptTemplate(
+    [
+      "你是一名精通长篇连载状态管理的编辑助手。",
+      "请仔细阅读最新的章节草稿，对照资料库和上一次状态记录，精确提取本章发生的所有变化。",
+      "要求：",
+      "1. 角色状态：记录每个出场角色的状态变化（认知、能力、关系、情感），before/after 必须具体。",
+      "2. 时间线：标记本章新增的事件节点。",
+      "3. 伏笔变化：检查是否有伏笔被推进、揭晓或延迟。",
+      "4. 关系变化：记录角色之间关系的具体变化。",
+      "5. 地点变化：记录主要场景地点的变化。",
+      "6. 未解决问题：列出本章遗留的悬念和待回答的问题。",
+      "请输出严格 JSON，不要附带 Markdown 代码块或额外解释。"
+    ].join("\n"),
+    ["请更新章节状态。", "{{payload}}"].join("\n")
+  ),
+  "run-audit": promptTemplate(
+    [
+      "你是一名专业的长篇连载总审编辑，擅长发现连续性漏洞、节奏问题和人设崩塌。",
+      "请对项目的近期章纲、草稿和状态记录进行全面审计。",
+      "审计维度：",
+      "1. 连续性：检查角色能力/信息是否与前文矛盾，时间线是否有缺口或冲突。",
+      "2. 节奏：分析近几章是否存在连续平铺、缺乏高潮点、钩子失效等问题。",
+      "3. 人设一致性：角色的行为动机是否偏离资料库设定，是否出现不合理的突然转变。",
+      "4. 主线推进：核心矛盾是否在持续推进，是否有偏离主线的水章。",
+      "5. 阻塞问题必须标记为 blocking，建议性问题标记为 warning 或 info。",
+      "6. 每个问题需提供具体的章节引用和修复建议。",
+      "请输出严格 JSON，不要附带 Markdown 代码块或额外解释。"
+    ].join("\n"),
+    ["请对当前项目执行总审。", "{{payload}}"].join("\n")
+  ),
+  "export-project": promptTemplate(
+    "你是一名小说导出助手。",
+    "当前导出由本地服务执行。"
+  )
+};
+
+export const DEFAULT_WORKBENCH_SETTINGS: WorkbenchSettings = {
+  editorPreferences: {
+    autoSaveMs: 1200,
+    editorWidth: 920,
+    fontSize: 20,
+    lineHeight: 1.9
+  },
+  startupPreferences: {
+    reopenLastProject: true,
+    lastOpenedProjectId: null
+  },
+  projectDefaults: {
+    genre: "悬疑成长",
+    targetWords: 1_000_000,
+    plannedVolumes: 6,
+    endingType: "阶段胜利后的开放式结局",
+    workflowMode: "strict",
+    defaultRootDirectory: ""
+  },
+  promptTemplates: DEFAULT_PROMPT_TEMPLATES,
+  exportPreferences: {
+    preferredFormat: "markdown",
+    lastExportedFormat: null,
+    lastExportedPath: "",
+    lastExportedAt: null
+  }
+};
+
+export function createProjectInputFromDefaults(): CreateProjectInput {
+  return {
+    title: "",
+    premise: "",
+    genre: DEFAULT_WORKBENCH_SETTINGS.projectDefaults.genre,
+    targetWords: DEFAULT_WORKBENCH_SETTINGS.projectDefaults.targetWords,
+    plannedVolumes: DEFAULT_WORKBENCH_SETTINGS.projectDefaults.plannedVolumes,
+    endingType: DEFAULT_WORKBENCH_SETTINGS.projectDefaults.endingType,
+    workflowMode: DEFAULT_WORKBENCH_SETTINGS.projectDefaults.workflowMode,
+    rootDirectory: DEFAULT_WORKBENCH_SETTINGS.projectDefaults.defaultRootDirectory || undefined
+  };
+}
+
+export const WORKFLOW_ACTION_LABELS: Record<WorkflowAction, string> = {
+  "generate-project-setup": "生成立项",
+  "generate-story-bible": "生成资料库",
+  "generate-volume-outline": "生成卷纲",
+  "generate-chapter-outline": "生成章纲",
+  "write-scene": "写场景",
+  "write-chapter": "写章节",
+  "update-chapter-state": "同步章节状态",
+  "run-audit": "运行总审",
+  "export-project": "导出项目"
+};
+
+export const EXPORT_FORMAT_LABELS: Record<ExportFormat, string> = {
+  markdown: "Markdown",
+  txt: "TXT",
+  epub: "EPUB"
+};

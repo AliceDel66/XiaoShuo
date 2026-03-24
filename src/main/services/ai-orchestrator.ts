@@ -194,30 +194,32 @@ export function mockPremiseCard(manifest: ProjectManifest): PremiseCard {
     .filter((item) => item.length > 1)
     .slice(0, 4);
   const seed = keywords[0] ?? manifest.genre;
+  const charName = extractProtagonistName(manifest.premise) ?? "主角";
   return {
     coreSellingPoints: [
       `${manifest.genre}主线 + ${seed}驱动的强钩子开局`,
-      "每卷解决一个阶段危机，同时抬高主角代价",
+      `${charName}的每一步行动都伴随代价升级，每卷解决一个阶段危机`,
       "资料库与伏笔表同步驱动，保证长期连载稳定性"
     ],
     targetWords: manifest.targetWords,
     volumePlan: Array.from({ length: manifest.plannedVolumes }, (_, index) => {
       const number = index + 1;
-      return `第${number}卷：围绕“${keywords[index % Math.max(1, keywords.length)] ?? "核心危机"}”展开阶段冲突，并在卷末抬升世界真相。`;
+      return `第${number}卷：${charName}围绕"${keywords[index % Math.max(1, keywords.length)] ?? "核心危机"}"展开阶段冲突，并在卷末抬升世界真相。`;
     }),
     protagonistGrowthCurve: [
-      "从被动卷入到主动理解规则",
-      "从局部求生到主动布局反击",
-      "从个人成长升级为决定世界走向的关键变量"
+      `${charName}从被动卷入到主动理解规则`,
+      `${charName}从局部求生到主动布局反击`,
+      `${charName}从个人成长升级为决定世界走向的关键变量`
     ],
-    mainConflict: `主角必须在“${manifest.premise}”带来的持续代价中成长，否则主线危机将全面失控。`,
+    mainConflict: `${charName}必须在"${manifest.premise}"带来的持续代价中成长，否则主线危机将全面失控。`,
     endingType: manifest.endingType
   };
 }
 
 export function mockStoryBible(snapshot: ProjectSnapshot): StoryBible {
-  const protagonistName = snapshot.manifest.title.slice(0, 2) || "主角";
+  const protagonistName = extractProtagonistName(snapshot.manifest.premise) ?? (snapshot.manifest.title.slice(0, 2) || "主角");
   const genre = snapshot.manifest.genre;
+  const premise = snapshot.manifest.premise;
   return {
     world: [
       {
@@ -616,4 +618,25 @@ export function buildAuditPreviewText(report: AuditReport): string {
 
 export function buildDraftModelSummary(draft: ChapterDraft): string {
   return excerpt(stripMarkdown(draft.markdown), 2400);
+}
+
+export function extractProtagonistName(premise: string): string | null {
+  const patterns = [
+    /(?:主角|主人公|男主|女主)(?:叫|名叫|是|名为|名字是)[""「]?([\u4e00-\u9fff]{2,4})[""」]?/,
+    /([\u4e00-\u9fff]{2,4})(?:是|作为|身为)(?:本(?:书|文|作)|故事|小说)?(?:的)?(?:主角|主人公|男主|女主)/,
+    /(?:讲述|描述|围绕)(?:了)?(?:一个)?(?:名叫|叫做|叫)?[""「]?([\u4e00-\u9fff]{2,4})[""」]?/,
+    /^[""「]?([\u4e00-\u9fff]{2,4})[""」]?(?:是一|每次|在一|发现|意外|偶然|被迫|不得不|从小)/
+  ];
+  for (const pattern of patterns) {
+    const match = premise.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  const namePattern = /(?:^|[，。！？；\s])([\u4e00-\u9fff]{2,3})(?:每次|发现|意外|偶然|被迫|突然|开始|决定|必须|不得不|从此)/;
+  const nameMatch = premise.match(namePattern);
+  if (nameMatch?.[1]) {
+    return nameMatch[1];
+  }
+  return null;
 }

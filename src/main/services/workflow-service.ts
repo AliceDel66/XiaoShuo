@@ -98,7 +98,9 @@ export class WorkflowService {
     const context: Record<string, string> = {
       actionLabel: WORKFLOW_ACTION_LABELS[input.action],
       projectTitle: snapshot.manifest.title,
+      projectPremise: snapshot.manifest.premise,
       projectGenre: snapshot.manifest.genre,
+      protagonistName: snapshot.storyBible?.characters.find((c) => c.role === "主角")?.name ?? "",
       workflowMode: snapshot.manifest.workflowMode,
       targetVolume: String(input.volumeNumber ?? 1),
       targetChapter: input.chapterNumber ? String(input.chapterNumber) : "",
@@ -580,50 +582,61 @@ function buildPromptPayload(
   projectContextSummary: string[],
   prepared: PreparedGenerationTarget
 ): string {
+  const protagonistName = snapshot.storyBible?.characters.find((c) => c.role === "主角")?.name
+    ?? snapshot.premiseCard?.mainConflict?.match(/^([\u4e00-\u9fff]{2,4})(?:必须)/)?.[1]
+    ?? null;
   const sections = [
     `动作: ${WORKFLOW_ACTION_LABELS[input.action]}`,
-    `项目: ${JSON.stringify(snapshot.manifest)}`,
+    `项目标题: ${snapshot.manifest.title}`,
+    `一句话构思: ${snapshot.manifest.premise}`,
+    protagonistName ? `主角姓名: ${protagonistName}` : "",
+    `项目元信息: ${JSON.stringify({ genre: snapshot.manifest.genre, targetWords: snapshot.manifest.targetWords, plannedVolumes: snapshot.manifest.plannedVolumes, endingType: snapshot.manifest.endingType, workflowMode: snapshot.manifest.workflowMode })}`,
     `项目摘要: ${projectContextSummary.join(" | ")}`,
-    `参考上下文: ${referenceContext.join(" | ")}`
-  ];
+    referenceContext.length > 0 ? `参考上下文: ${referenceContext.join(" | ")}` : ""
+  ].filter(Boolean);
 
   switch (input.action) {
     case "generate-project-setup":
       sections.push(
+        '⚠️ 重要：一句话构思中如果提到了角色名字，在 mainConflict 和 protagonistGrowthCurve 中必须使用该名字，不要用"主角"代替。',
         'JSON schema: {"coreSellingPoints": string[], "targetWords": number, "volumePlan": string[], "protagonistGrowthCurve": string[], "mainConflict": string, "endingType": string}'
       );
       break;
     case "generate-story-bible":
       sections.push(
-        'JSON schema: {"world": [{"title": string, "summary": string, "rules": string[]}], "characters": [{"id": string, "name": string, "role": string, "goal": string, "conflict": string, "arc": string, "secrets": string[], "currentStatus": string}], "factions": [{"id": string, "name": string, "agenda": string, "resources": string[], "relationshipToProtagonist": string}], "items": [{"id": string, "name": string, "purpose": string, "owner": string, "status": string}], "timeline": [{"id": string, "timeLabel": string, "description": string, "relatedCharacters": string[], "chapterRef": string}], "foreshadows": [{"id": string, "clue": string, "plantedAt": string, "payoffPlan": string, "status": "open" | "paid-off" | "delayed"}]}',
-        `立项卡: ${JSON.stringify(snapshot.premiseCard)}`
+        '⚠️ 重要：characters 数组中 role="主角" 的角色，其 name 字段必须使用一句话构思中提到的角色名字。所有角色、势力、物品必须与上方立项卡的 mainConflict 和 volumePlan 直接关联，不得脱离故事主线。',
+        `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
+        'JSON schema: {"world": [{"title": string, "summary": string, "rules": string[]}], "characters": [{"id": string, "name": string, "role": string, "goal": string, "conflict": string, "arc": string, "secrets": string[], "currentStatus": string}], "factions": [{"id": string, "name": string, "agenda": string, "resources": string[], "relationshipToProtagonist": string}], "items": [{"id": string, "name": string, "purpose": string, "owner": string, "status": string}], "timeline": [{"id": string, "timeLabel": string, "description": string, "relatedCharacters": string[], "chapterRef": string}], "foreshadows": [{"id": string, "clue": string, "plantedAt": string, "payoffPlan": string, "status": "open" | "paid-off" | "delayed"}]}'
       );
       break;
     case "generate-volume-outline":
       sections.push(
-        'JSON schema: [{"id": string, "level": "volume", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "volumeNumber": number}]',
+        '⚠️ 重要：每卷的 summary、goal、conflict 必须直接引用资料库中的角色名、势力名和主线矛盾，卷与卷之间必须形成因果递进关系。',
         `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
-        `资料库: ${JSON.stringify(snapshot.storyBible)}`
+        `资料库: ${JSON.stringify(snapshot.storyBible)}`,
+        'JSON schema: [{"id": string, "level": "volume", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "volumeNumber": number}]'
       );
       break;
     case "generate-chapter-outline":
       sections.push(
-        'JSON schema: [{"id": string, "level": "chapter", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "chapterNumber": number, "volumeNumber": number}]',
+        '⚠️ 重要：章纲中的角色名、地点、冲突必须与资料库严格一致。每章的 goal 和 conflict 必须能追溯到卷纲和立项卡的主线矛盾。',
         `目标卷号: ${input.volumeNumber ?? 1}`,
-        `既有章纲: ${JSON.stringify(snapshot.outlines.filter((item) => item.level === "chapter"))}`,
+        `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
         `资料库: ${JSON.stringify(snapshot.storyBible)}`,
-        `立项卡: ${JSON.stringify(snapshot.premiseCard)}`
+        `既有章纲: ${JSON.stringify(snapshot.outlines.filter((item) => item.level === "chapter"))}`,
+        'JSON schema: [{"id": string, "level": "chapter", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "chapterNumber": number, "volumeNumber": number}]'
       );
       break;
     case "write-scene":
     case "write-chapter":
       sections.push(
-        'JSON schema: {"id": string, "title": string, "chapterNumber": number, "volumeNumber": number, "scope": "scene" | "chapter", "markdown": string}',
+        '⚠️ 重要：正文中所有角色必须使用资料库中的准确姓名，不得使用"主角""他/她"等代称开头。角色行为、能力、关系必须与资料库一致。如果章纲中有具体的冲突和钩子描述，必须在正文中体现。',
         `目标章纲: ${JSON.stringify(prepared.targetOutline ?? null)}`,
         `资料库: ${JSON.stringify(snapshot.storyBible)}`,
         `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
         `写作范围: ${input.scope ?? "chapter"}`,
-        `附加说明: ${input.notes ?? ""}`
+        `附加说明: ${input.notes ?? ""}`,
+        'JSON schema: {"id": string, "title": string, "chapterNumber": number, "volumeNumber": number, "scope": "scene" | "chapter", "markdown": string}'
       );
       break;
     case "update-chapter-state":
