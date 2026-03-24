@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --editor-max-width: 920px;
+  font-family: "IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 24%),
+    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.12), transparent 28%),
+    linear-gradient(180deg, #090b11 0%, #0b1017 48%, #0d1119 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background: transparent;
+  color: #e2e8f0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+pre {
+  margin: 0;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.18);
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.38);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.48);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}

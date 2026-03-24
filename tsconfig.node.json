@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.node.tsbuildinfo"
+  },
+  "include": [
+    "electron.vite.config.ts",
+    "vitest.config.ts",
+    "src/main/**/*.ts",
+    "src/shared/**/*.ts",
+    "tests/**/*.ts"
+  ]
+}
