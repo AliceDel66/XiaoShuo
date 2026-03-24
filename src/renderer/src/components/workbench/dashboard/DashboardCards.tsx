@@ -22,9 +22,7 @@ const dashboardActions = [
   "generate-project-setup",
   "generate-story-bible",
   "generate-volume-outline",
-  "generate-chapter-outline",
-  "write-scene",
-  "write-chapter"
+  "generate-chapter-outline"
 ] as const;
 
 function PremiseCardSummary({ premiseCard }: { premiseCard: PremiseCard }) {
@@ -101,7 +99,7 @@ export function DashboardCards({ state, actions }: WorkbenchHookResult) {
                 </GhostButton>
               }
             />
-            <div className="space-y-4 p-5">
+            <div className="max-h-[520px] space-y-4 overflow-y-auto p-5">
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-2xl border border-white/6 bg-[#0d1018] p-3 text-center">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">类型</div>
@@ -259,55 +257,13 @@ export function DashboardCards({ state, actions }: WorkbenchHookResult) {
         <PanelHeader
           eyebrow="Workflow"
           title="生成控制"
-          subtitle="所有动作继续走原有 workflow 与候选确认流程。"
+          subtitle="规划阶段的生成动作。写场景、写章节请在编辑页面操作。"
           action={<StatusPill tone="info">{state.selectedProject?.manifest.workflowMode === "strict" ? "严格流" : "自由流"}</StatusPill>}
         />
         <div className="space-y-4 p-5">
-          <div className="grid grid-cols-3 gap-3">
-            <Field label="卷号">
-              <Input
-                type="number"
-                min={1}
-                value={state.workflowDraft.volumeNumber}
-                onChange={(event) =>
-                  actions.setWorkflowDraft((current) => ({
-                    ...current,
-                    volumeNumber: Number(event.target.value || 1)
-                  }))
-                }
-              />
-            </Field>
-            <Field label="章节号">
-              <Input
-                type="number"
-                min={1}
-                value={state.workflowDraft.chapterNumber}
-                onChange={(event) =>
-                  actions.setWorkflowDraft((current) => ({
-                    ...current,
-                    chapterNumber: Number(event.target.value || 1)
-                  }))
-                }
-              />
-            </Field>
-            <Field label="写作粒度">
-              <Select
-                value={state.workflowDraft.scope}
-                onChange={(event) =>
-                  actions.setWorkflowDraft((current) => ({
-                    ...current,
-                    scope: event.target.value as typeof current.scope
-                  }))
-                }
-              >
-                <option value="chapter">按章</option>
-                <option value="scene">按场景</option>
-              </Select>
-            </Field>
-          </div>
           <Field label="工作流备注">
             <Textarea
-              rows={3}
+              rows={2}
               value={state.workflowDraft.notes}
               onChange={(event) =>
                 actions.setWorkflowDraft((current) => ({
@@ -315,7 +271,7 @@ export function DashboardCards({ state, actions }: WorkbenchHookResult) {
                   notes: event.target.value
                 }))
               }
-              placeholder="例如：这一章要压低信息量，重点放氛围和悬念。"
+              placeholder="例如：希望主角形象更阴郁，冲突要更尖锐。"
             />
           </Field>
           <div className="grid grid-cols-2 gap-2">
@@ -324,12 +280,7 @@ export function DashboardCards({ state, actions }: WorkbenchHookResult) {
                 key={action}
                 disabled={!state.selectedProject || Boolean(state.activeJob)}
                 onClick={() => void actions.startWorkflow(action)}
-                className={cn(
-                  "justify-center",
-                  action === "write-scene" || action === "write-chapter"
-                    ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/16"
-                    : undefined
-                )}
+                className="justify-center"
               >
                 {WORKFLOW_ACTION_LABELS[action]}
               </SecondaryButton>

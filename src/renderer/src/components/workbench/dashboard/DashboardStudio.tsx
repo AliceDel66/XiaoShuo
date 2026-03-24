@@ -83,7 +83,7 @@ export function DashboardStudio({ state, actions }: WorkbenchHookResult) {
 
           {studioTab === "process" ? (
             <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr]">
-              <div className="border-r border-white/6 p-5">
+              <div className="border-r border-white/6 p-5 overflow-y-auto max-h-[520px]">
                 <div className="space-y-3">
                   {Object.entries(phaseLabels).map(([phase, label]) => {
                     const currentPhase = state.activeJob?.progress.phase;
@@ -111,7 +111,7 @@ export function DashboardStudio({ state, actions }: WorkbenchHookResult) {
                   })}
                 </div>
               </div>
-              <div className="p-5">
+              <div className="p-5 overflow-y-auto max-h-[520px]">
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-200">步骤日志</h3>
                   <StatusPill tone={state.activePreviewSession?.status === "failed" ? "danger" : "neutral"}>
@@ -137,7 +137,7 @@ export function DashboardStudio({ state, actions }: WorkbenchHookResult) {
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-[0.72fr_1.28fr]">
-              <div className="border-r border-white/6 p-5">
+              <div className="border-r border-white/6 p-5 overflow-y-auto max-h-[600px]">
                 <div className="space-y-3">
                   {(state.activePreviewSession?.candidates ?? []).length === 0 ? (
                     <EmptyState title="还没有候选版本" detail="触发工作流后，候选会先进入这里，再由你确认写回正式文档。" />
@@ -163,33 +163,39 @@ export function DashboardStudio({ state, actions }: WorkbenchHookResult) {
                   )}
                 </div>
               </div>
-              <div className="flex min-h-[420px] flex-col p-5">
+              <div className="flex max-h-[600px] min-h-[420px] flex-col p-5">
                 {selectedCandidate ? (
                   <>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-lg font-semibold text-white">{selectedCandidate.displayTitle}</div>
-                        <div className="mt-1 text-sm text-slate-500">
-                          {state.activePreviewSession?.action ? WORKFLOW_ACTION_LABELS[state.activePreviewSession.action] : "候选版本"}
-                        </div>
+                    <div>
+                      <div className="text-lg font-semibold text-white">{selectedCandidate.displayTitle}</div>
+                      <div className="mt-1 text-sm text-slate-500">
+                        {state.activePreviewSession?.action ? WORKFLOW_ACTION_LABELS[state.activePreviewSession.action] : "候选版本"}
                       </div>
+                    </div>
+                    <pre className="mt-4 min-h-[200px] max-h-[360px] overflow-y-auto whitespace-pre-wrap break-words rounded-[28px] border border-white/6 bg-[#0d1018] p-5 text-sm leading-7 text-slate-200">
+                      {selectedCandidate.renderedContent}
+                    </pre>
+                    <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-white/6 bg-[#0d1018] px-5 py-3">
                       <div className="flex items-center gap-2">
+                        <StatusPill tone={state.activePreviewSession?.status === "confirmed" ? "success" : "neutral"}>
+                          {state.activePreviewSession?.status === "confirmed" ? "已同步" : "未保存"}
+                        </StatusPill>
                         <SecondaryButton disabled={Boolean(state.activeJob)} onClick={() => void actions.regenerateCandidate()}>
                           重生成
                         </SecondaryButton>
-                        <PrimaryButton
-                          disabled={Boolean(state.activeJob)}
-                          onClick={() => void actions.confirmCandidate(selectedCandidate.candidateId)}
-                        >
-                          确认候选
-                        </PrimaryButton>
+                        <GhostButton disabled={Boolean(state.activeJob)} onClick={() => void actions.discardSession()}>
+                          丢弃会话
+                        </GhostButton>
                       </div>
+                      <PrimaryButton
+                        disabled={Boolean(state.activeJob) || state.activePreviewSession?.status === "confirmed"}
+                        onClick={() => void actions.confirmCandidate(selectedCandidate.candidateId)}
+                      >
+                        保存到正式文档
+                      </PrimaryButton>
                     </div>
-                    <pre className="mt-4 min-h-0 flex-1 overflow-auto rounded-[28px] border border-white/6 bg-[#0d1018] p-5 text-sm leading-7 text-slate-200">
-                      {selectedCandidate.renderedContent}
-                    </pre>
                     {state.activePreviewSession ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <SecondaryButton onClick={actions.openPromptDrawer}>
                           <Sparkles size={14} className="mr-1" />
                           查看 Prompt
@@ -201,9 +207,6 @@ export function DashboardStudio({ state, actions }: WorkbenchHookResult) {
                         <SecondaryButton onClick={() => void actions.openArtifact(state.activePreviewSession!.artifactRef)}>
                           打开正式文档
                         </SecondaryButton>
-                        <GhostButton disabled={Boolean(state.activeJob)} onClick={() => void actions.discardSession()}>
-                          丢弃会话
-                        </GhostButton>
                       </div>
                     ) : null}
                   </>
@@ -217,7 +220,7 @@ export function DashboardStudio({ state, actions }: WorkbenchHookResult) {
 
         <ShellPanel>
           <PanelHeader eyebrow="Reference Search" title="参考片段检索" subtitle="这里保留真实 corpus 搜索结果。" />
-          <div className="space-y-4 p-5">
+          <div className="max-h-[520px] space-y-4 overflow-y-auto p-5">
             <Field label="检索关键词">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-3 text-slate-500" size={16} />

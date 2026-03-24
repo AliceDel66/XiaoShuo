@@ -420,6 +420,23 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
         return;
       }
 
+      // Bug fix: if there's already an active session for the same action,
+      // reuse it so existing candidates are preserved (regenerate instead of creating new session)
+      const existingSession = dashboardData?.activePreviewSession;
+      if (existingSession && existingSession.action === action && existingSession.candidates.length > 0) {
+        setBusyFlag("start-workflow", true);
+        setError(null);
+        try {
+          await api.regenerateCandidate(existingSession.sessionId);
+          pushNotice(`正在重新生成 ${action}（保留已有候选版本）。`);
+        } catch (workflowError) {
+          setError(workflowError instanceof Error ? workflowError.message : String(workflowError));
+        } finally {
+          setBusyFlag("start-workflow", false);
+        }
+        return;
+      }
+
       setBusyFlag("start-workflow", true);
       setError(null);
       try {
@@ -441,7 +458,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
         setBusyFlag("start-workflow", false);
       }
     },
-    [api, buildWorkflowInput, pushNotice, setBusyFlag]
+    [api, buildWorkflowInput, dashboardData?.activePreviewSession, pushNotice, setBusyFlag]
   );
 
   const confirmCandidate = useCallback(
