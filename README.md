@@ -26,6 +26,9 @@
 | **候选预览**          | 每次生成产出候选版本，支持预览、重新生成、确认写回               |
 | **严格流 / 自由流**   | 严格流按步骤执行，自由流允许跳步操作                             |
 | **Prompt 模板可编辑** | 内置全套 Prompt 模板，可在设置中自定义调整                       |
+| **SSE 流式传输**      | AI 调用默认启用流式传输，避免反向代理 504 网关超时               |
+| **模型连通性测试**    | 设置页一键测试 Provider / 各角色模型 / Embedding 是否正常        |
+| **长篇记忆系统**      | 四层分层记忆（长期/中期/短期/工作层）+ MemoryPatch 变更追踪     |
 
 ## 🏗️ 技术架构
 
@@ -53,6 +56,10 @@
 │  │ ExportService │  │ PreviewSession     │  │
 │  │ (多格式导出)   │  │  (候选管理)       │  │
 │  └───────────────┘  └────────────────────┘  │
+│  ┌───────────────┐  ┌────────────────────┐  │
+│  │StoryMemory    │  │ GenerationCoord    │  │
+│  │  Service      │  │  (生成任务协调)    │  │
+│  └───────────────┘  └────────────────────┘  │
 └─────────────────────────────────────────────┘
 ```
 
@@ -71,13 +78,14 @@ src/
 │   ├── ipc.ts                    # IPC 通信注册
 │   ├── preload.ts                # 预加载脚本
 │   └── services/
-│       ├── ai-orchestrator.ts    # AI 模型调度与 JSON 解析
+│       ├── ai-orchestrator.ts    # AI 模型调度、SSE 流式传输与 JSON 解析
 │       ├── corpus-service.ts     # 参考语料导入、分析与检索
 │       ├── export-service.ts     # Markdown/TXT/EPUB 导出
-│       ├── generation-coordinator.ts # 生成任务协调器
+│       ├── generation-coordinator.ts # 生成任务协调器（支持取消与重生成）
 │       ├── library-database.ts   # 本地数据库管理
 │       ├── preview-session-service.ts # 候选预览会话管理
 │       ├── project-repository.ts # 项目数据持久化
+│       ├── story-memory-service.ts # 长篇记忆系统（四层分层+Patch 管理）
 │       ├── workbench-service.ts  # 工作台顶层服务
 │       └── workflow-service.ts   # 工作流引擎（核心）
 ├── renderer/                     # React 渲染进程
@@ -97,6 +105,7 @@ src/
 │           └── dashboard/        # 仪表盘子组件
 └── shared/
     ├── types.ts                  # 全局共享类型定义
+    ├── memory-types.ts           # 长篇记忆系统类型定义
     └── defaults.ts               # 默认配置与 Prompt 模板
 ```
 
@@ -171,6 +180,42 @@ npm run typecheck
 | 嵌入模型 (Embedding) | 用于参考书语义检索         |
 
 每个角色可独立设置温度参数（Temperature）。
+
+### 流式传输
+
+AI 调用默认启用 **SSE 流式传输**（`stream: true`），可有效避免使用反向代理时因长时间等待模型响应而触发 **504 Gateway Timeout**。流式模式下，数据以增量 chunk 持续到达，保持连接活跃。
+
+### 连通性测试
+
+设置页面提供一键「测试连通性」功能，依次检测：
+- Provider 配置（URL + Key 是否填写）
+- Planner / Writer / Auditor 模型（发送极简探测请求验证可达性）
+- Embedding 模型（可选，未配置时自动跳过）
+
+相同模型名称的探测结果会自动复用，避免重复请求。
+
+## 🧠 长篇记忆系统（Phase 2）
+
+为解决长篇创作（20+ 章）场景下的上下文爆炸和状态累积问题，引入了独立的 **StoryMemory** 系统：
+
+### 四层分层架构
+
+| 层级       | 内容                                         | 更新频率       |
+| ---------- | -------------------------------------------- | -------------- |
+| **长期层** | 世界规则、角色基础设定、势力结构、核心道具   | 极低（跨卷）   |
+| **中期层** | 主线进度、关系矩阵、伏笔状态、卷级目标      | 每 3-5 章      |
+| **短期层** | 最近 3-5 章详细快照、章末钩子、未解问题      | 每章           |
+| **工作层** | 当前章纲、用户指令、上一场景尾段             | 每次生成       |
+
+### MemoryPatch 变更追踪
+
+所有记忆变更通过 `MemoryPatch → validate → confirm → apply` 管道，支持：
+- 冲突检测（stale-before / entity-not-found / duplicate-update）
+- 人工确认或自动应用
+- 完整 patch 历史与回滚
+- 从 `ChapterStateDelta` / `StoryBible` 自动提取 patch
+
+详细设计方案见 [section2.md](section2.md)。
 
 ## 📝 许可证
 

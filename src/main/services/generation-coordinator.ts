@@ -10,6 +10,7 @@ import type {
   SearchResult,
   WorkflowExecutionInput
 } from "../../shared/types";
+import type { AssembledMemoryContext } from "../../shared/memory-types";
 import { nowIso } from "./helpers";
 import { PreviewSessionService } from "./preview-session-service";
 import { WorkflowService } from "./workflow-service";
@@ -18,6 +19,7 @@ interface GenerationContext {
   snapshot: ProjectSnapshot;
   referenceHints: ReferenceCorpusManifest[];
   referenceMatches: SearchResult[];
+  memoryContext?: AssembledMemoryContext | null;
 }
 
 const orderedPhases: GenerationPhase[] = [
@@ -38,6 +40,9 @@ export class GenerationCoordinator {
   private activeJob: GenerationJob | null = null;
 
   private activeSessionId: string | null = null;
+
+  /** Tracks the current running job so stale fire-and-forget tasks can detect cancellation. */
+  private activeJobId: string | null = null;
 
   constructor(
     private readonly workflowService: WorkflowService,
@@ -73,10 +78,30 @@ export class GenerationCoordinator {
     existingSessionId?: string
   ): Promise<{ jobId: string; sessionId: string }> {
     if (this.activeJob?.status === "running") {
-      throw new Error("当前已有任务运行中，请等待当前生成完成。");
+      // Cancel the stale job instead of hard-throwing.
+      // This allows regeneration to proceed while a slow job is still in-flight.
+      console.warn(`[GenerationCoordinator] 取消正在运行的旧任务 ${this.activeJob.jobId}，启动新任务。`);
+      await this.failJob(this.activeJob, "已被新的生成任务取代。");
     }
 
-    const context = await this.loadGenerationContext(input);
+    let context: GenerationContext;
+    try {
+      context = await this.loadGenerationContext(input);
+    } catch (error) {
+      // If context loading fails after we already cancelled the old job, make sure
+      // the session gets a proper error so the UI doesn't end up in a blank state.
+      const message = error instanceof Error ? error.message : String(error);
+      if (existingSessionId) {
+        const failedSession = await this.previewSessionService.updateSession(existingSessionId, (current) => ({
+          ...current,
+          status: "failed",
+          errorMessage: `上下文加载失败：${message}`
+        }));
+        this.emitSession(failedSession);
+      }
+      throw error;
+    }
+
     const prepared = this.workflowService.prepareGenerationTarget(context.snapshot, input);
     const sessionId = existingSessionId ?? `session-${nanoid(8)}`;
 
@@ -113,6 +138,7 @@ export class GenerationCoordinator {
     };
 
     this.activeJob = job;
+    this.activeJobId = job.jobId;
     this.emitJob(job);
     void this.runJob(job, session.sessionId, input, context);
 
@@ -120,6 +146,11 @@ export class GenerationCoordinator {
       jobId: job.jobId,
       sessionId: session.sessionId
     };
+  }
+
+  /** Returns true if the given job has been superseded by a newer one. */
+  private isStale(jobId: string): boolean {
+    return this.activeJobId !== jobId;
   }
 
   private async runJob(
@@ -130,6 +161,8 @@ export class GenerationCoordinator {
   ): Promise<void> {
     try {
       await this.pushTrace(sessionId, "queued", "已创建生成会话", `${input.action} 已排队。`);
+
+      if (this.isStale(job.jobId)) return;
 
       const prepared = this.workflowService.prepareGenerationTarget(context.snapshot, input);
       await this.updateJob(job, "preflight", prepared.blocked ? "前置校验失败。" : "前置校验通过。");
@@ -154,6 +187,8 @@ export class GenerationCoordinator {
         return;
       }
 
+      if (this.isStale(job.jobId)) return;
+
       await this.updateJob(job, "retrieval", "正在整理项目上下文与参考素材。");
       await this.pushTrace(
         sessionId,
@@ -162,12 +197,15 @@ export class GenerationCoordinator {
         `参考书 ${context.referenceHints.length} 本，命中素材 ${context.referenceMatches.length} 条。`
       );
 
+      if (this.isStale(job.jobId)) return;
+
       const promptTrace = this.workflowService.buildPromptTrace(
         context.snapshot,
         input,
         context.referenceHints,
         context.referenceMatches,
-        prepared
+        prepared,
+        context.memoryContext ?? null
       );
       const promptReadySession = await this.previewSessionService.updateSession(sessionId, (session) => ({
         ...session,
@@ -182,6 +220,8 @@ export class GenerationCoordinator {
         `system prompt ${promptTrace.systemPrompt.length} 字，user prompt ${promptTrace.userPrompt.length} 字。`
       );
 
+      if (this.isStale(job.jobId)) return;
+
       await this.updateJob(job, "model-running", "正在调用模型生成候选内容。");
       const generation = await this.workflowService.generateCandidate(
         context.snapshot,
@@ -192,11 +232,15 @@ export class GenerationCoordinator {
         promptReadySession.candidates.length + 1
       );
 
+      if (this.isStale(job.jobId)) return;
+
       await this.pushTrace(
         sessionId,
         "model-running",
-        generation.source === "model" ? "模型生成完成" : "使用本地回退生成",
-        generation.source === "model" ? "已收到模型响应。" : "未配置模型或调用失败，已切换本地模板。"
+        generation.source === "model" ? "模型生成完成" : "⚠ 使用本地回退生成",
+        generation.source === "model"
+          ? "已收到模型响应。"
+          : `未配置模型或调用失败，已切换本地模板。原因：${generation.candidate.source === "fallback" ? "fallback" : "unknown"}`
       );
 
       await this.updateJob(job, "parsing", "正在解析候选内容。");
@@ -204,12 +248,13 @@ export class GenerationCoordinator {
         sessionId,
         "parsing",
         "候选内容解析成功",
-        `生成 ${generation.candidate.displayTitle}。`
+        `生成 ${generation.candidate.displayTitle}（来源：${generation.source}）。`
       );
 
       const nextCandidate = {
         ...generation.candidate,
-        sessionId
+        sessionId,
+        source: generation.source
       };
       const candidateReadySession = await this.previewSessionService.updateSession(sessionId, (session) => ({
         ...session,
@@ -224,16 +269,22 @@ export class GenerationCoordinator {
       await this.updateJob(job, "candidate-ready", "候选版本已生成，可预览、重生成或保存。");
       await this.pushTrace(sessionId, "candidate-ready", "候选版本已就绪", nextCandidate.displayTitle);
 
-      const completedJob: GenerationJob = {
-        ...job,
-        status: "completed",
-        progress: phaseProgress("completed", "本次生成已完成，等待用户确认保存。"),
-        finishedAt: nowIso()
-      };
-      this.activeJob = null;
-      this.emitJob(completedJob);
-      this.emitter.emit("event", { type: "job-cleared" } satisfies GenerationEvent);
+      // Only clear activeJob if this job is still the active one (not superseded).
+      if (!this.isStale(job.jobId)) {
+        const completedJob: GenerationJob = {
+          ...job,
+          status: "completed",
+          progress: phaseProgress("completed", "本次生成已完成，等待用户确认保存。"),
+          finishedAt: nowIso()
+        };
+        this.activeJob = null;
+        this.activeJobId = null;
+        this.emitJob(completedJob);
+        this.emitter.emit("event", { type: "job-cleared" } satisfies GenerationEvent);
+      }
     } catch (error) {
+      // If this job has been superseded, swallow the error silently.
+      if (this.isStale(job.jobId)) return;
       const message = error instanceof Error ? error.message : String(error);
       const failedSession = await this.previewSessionService.updateSession(sessionId, (session) => ({
         ...session,
@@ -262,7 +313,10 @@ export class GenerationCoordinator {
       errorMessage: message,
       finishedAt: nowIso()
     };
-    this.activeJob = null;
+    if (this.activeJobId === job.jobId) {
+      this.activeJob = null;
+      this.activeJobId = null;
+    }
     this.emitJob(failedJob);
     this.emitter.emit("event", { type: "job-cleared" } satisfies GenerationEvent);
   }

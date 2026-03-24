@@ -5,6 +5,8 @@ import type {
   ChapterStateDelta,
   ChunkScope,
   GenerationPromptTrace,
+  ModelConnectionCheck,
+  ModelConnectionTestResult,
   ModelProfile,
   OutlinePacket,
   PremiseCard,
@@ -18,10 +20,61 @@ import { excerpt, nowIso, stripMarkdown } from "./helpers";
 
 export type ModelRole = "plannerModel" | "writerModel" | "auditorModel";
 
+/**
+ * Controls behaviour when a model call fails or is not configured:
+ * - `"allow"` (dev) – fall back to local mock data with a console warning.
+ * - `"deny"`  (prod) – throw so the caller surfaces the real error to the user.
+ */
+export type FallbackPolicy = "allow" | "deny";
+
+/* ────────────── Provider Adapter Interfaces ────────────── */
+
+export interface ChatCompletionParams {
+  model: string;
+  temperature: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+  /** When true, uses SSE streaming to avoid gateway timeouts on long generations. */
+  stream?: boolean;
+  messages: Array<{ role: string; content: string }>;
+}
+
+export interface ChatCompletionResult {
+  text: string;
+  finishReason?: string;
+  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+}
+
+/**
+ * Abstraction over LLM provider HTTP endpoints.
+ * Implement this interface to swap in a different provider (e.g. Anthropic, local model).
+ */
+export interface ProviderAdapter {
+  chat(params: ChatCompletionParams, connection: ProviderConnection): Promise<ChatCompletionResult>;
+  embed?(texts: string[], connection: ProviderConnection & { model: string; timeoutMs?: number }): Promise<number[][] | null>;
+}
+
+export interface ProviderConnection {
+  baseUrl: string;
+  apiKey: string;
+}
+
+/**
+ * Pluggable JSON extraction strategy.
+ * The default implementation tries direct parse, then scans for the first JSON block.
+ */
+export interface ResponseParser {
+  extractJson<T>(text: string): T | null;
+}
+
+/* ────────────── Execution Result ────────────── */
+
 export interface AiExecutionResult<T> {
   data: T;
   source: "model" | "fallback";
   rawText: string;
+  /** Present when source is "fallback" — explains why the model call was not used. */
+  fallbackReason?: string;
 }
 
 interface JsonCallOptions<T> {
@@ -30,58 +83,189 @@ interface JsonCallOptions<T> {
   fallback: () => T;
 }
 
+interface ProbeOutcome {
+  ok: boolean;
+  detail: string;
+  latencyMs?: number;
+  reused?: boolean;
+}
+
+/* ────────────── Default Implementations ────────────── */
+
+/**
+ * Provider adapter for OpenAI-compatible chat/completions and embeddings endpoints.
+ * Works with official OpenAI, Azure OpenAI, and third-party compatible proxies.
+ */
+export class OpenAICompatibleAdapter implements ProviderAdapter {
+  async chat(params: ChatCompletionParams, connection: ProviderConnection): Promise<ChatCompletionResult> {
+    if (params.stream) {
+      return this.chatStream(params, connection);
+    }
+    return this.chatNonStream(params, connection);
+  }
+
+  /** Non-streaming chat — original implementation. */
+  private async chatNonStream(params: ChatCompletionParams, connection: ProviderConnection): Promise<ChatCompletionResult> {
+    const response = await fetchWithTimeout(joinApiUrl(connection.baseUrl, "chat/completions"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${connection.apiKey}`
+      },
+      body: JSON.stringify({
+        model: params.model,
+        temperature: params.temperature,
+        max_tokens: params.maxTokens,
+        messages: params.messages
+      })
+    }, params.timeoutMs);
+
+    if (!response.ok) {
+      throw new Error(`Chat request failed: ${response.status}`);
+    }
+
+    const payload = (await response.json()) as {
+      choices?: Array<{
+        message?: { content?: string | Array<{ type?: string; text?: string }> };
+        finish_reason?: string;
+      }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };
+
+    const rawContent = payload.choices?.[0]?.message?.content;
+    const text =
+      typeof rawContent === "string"
+        ? rawContent
+        : Array.isArray(rawContent)
+          ? rawContent.map((item) => item.text ?? "").join("")
+          : "";
+
+    return {
+      text,
+      finishReason: payload.choices?.[0]?.finish_reason,
+      usage: payload.usage
+        ? {
+            promptTokens: payload.usage.prompt_tokens,
+            completionTokens: payload.usage.completion_tokens,
+            totalTokens: payload.usage.total_tokens
+          }
+        : undefined
+    };
+  }
+
+  /**
+   * Streaming chat — sends `stream: true` and reads SSE chunks.
+   * This keeps the HTTP connection alive with incremental data,
+   * preventing reverse-proxy 504 gateway timeouts on long generations.
+   */
+  private async chatStream(params: ChatCompletionParams, connection: ProviderConnection): Promise<ChatCompletionResult> {
+    const response = await fetchWithTimeout(joinApiUrl(connection.baseUrl, "chat/completions"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${connection.apiKey}`
+      },
+      body: JSON.stringify({
+        model: params.model,
+        temperature: params.temperature,
+        max_tokens: params.maxTokens,
+        messages: params.messages,
+        stream: true
+      })
+    }, params.timeoutMs);
+
+    if (!response.ok) {
+      throw new Error(`Chat request failed (stream): ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error("Chat stream response has no body");
+    }
+
+    return consumeSSEStream(response.body);
+  }
+
+  async embed(
+    texts: string[],
+    connection: ProviderConnection & { model: string; timeoutMs?: number }
+  ): Promise<number[][] | null> {
+    const response = await fetchWithTimeout(joinApiUrl(connection.baseUrl, "embeddings"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${connection.apiKey}`
+      },
+      body: JSON.stringify({ model: connection.model, input: texts })
+    }, connection.timeoutMs);
+
+    if (!response.ok) {
+      throw new Error(`Embeddings request failed: ${response.status}`);
+    }
+
+    const payload = (await response.json()) as { data?: Array<{ embedding: number[] }> };
+    if (!payload.data || payload.data.length === 0) {
+      return null;
+    }
+    return payload.data.map((item) => item.embedding);
+  }
+}
+
+export const defaultResponseParser: ResponseParser = {
+  extractJson: parseJsonFromText
+};
+
+/* ────────────── Orchestrator ────────────── */
+
 export class AiOrchestrator {
-  constructor(private readonly getModelProfile: () => Promise<ModelProfile>) {}
+  private readonly adapter: ProviderAdapter;
+  private readonly parser: ResponseParser;
+
+  constructor(
+    private readonly getModelProfile: () => Promise<ModelProfile>,
+    private readonly fallbackPolicy: FallbackPolicy = "allow",
+    adapter?: ProviderAdapter,
+    parser?: ResponseParser
+  ) {
+    this.adapter = adapter ?? new OpenAICompatibleAdapter();
+    this.parser = parser ?? defaultResponseParser;
+  }
+
+  private applyFallback<T>(reason: string, options: JsonCallOptions<T>): AiExecutionResult<T> {
+    if (this.fallbackPolicy === "deny") {
+      throw new Error(`[AI] 模型调用失败，且当前策略禁止回退 (deny)：${reason}`);
+    }
+    console.warn(`[AI fallback] ${reason} — 已回退到本地模板 (policy=${this.fallbackPolicy})`);
+    const fallbackData = options.fallback();
+    return {
+      data: fallbackData,
+      source: "fallback",
+      rawText: JSON.stringify(fallbackData, null, 2),
+      fallbackReason: reason
+    };
+  }
 
   async executeJson<T>(options: JsonCallOptions<T>): Promise<AiExecutionResult<T>> {
     const profile = await this.getModelProfile();
     const model = profile[options.role];
     if (!profile.baseUrl || !profile.apiKey || !model) {
-      const fallback = options.fallback();
-      return {
-        data: fallback,
-        source: "fallback",
-        rawText: JSON.stringify(fallback, null, 2)
-      };
+      return this.applyFallback("模型未配置 (缺少 baseUrl / apiKey / model)", options);
     }
 
     try {
-      const response = await fetch(joinApiUrl(profile.baseUrl, "chat/completions"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${profile.apiKey}`
-        },
-        body: JSON.stringify({
+      const result = await this.adapter.chat(
+        {
           model,
           temperature: profile.temperaturePolicy[toTemperatureKey(options.role)],
+          stream: true,
           messages: [
             { role: "system", content: options.promptTrace.systemPrompt },
             { role: "user", content: options.promptTrace.userPrompt }
           ]
-        })
-      });
+        },
+        { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+      );
 
-      if (!response.ok) {
-        throw new Error(`Chat request failed: ${response.status}`);
-      }
-
-      const payload = (await response.json()) as {
-        choices?: Array<{
-          message?: {
-            content?: string | Array<{ type?: string; text?: string }>;
-          };
-        }>;
-      };
-
-      const rawContent = payload.choices?.[0]?.message?.content;
-      const text =
-        typeof rawContent === "string"
-          ? rawContent
-          : Array.isArray(rawContent)
-            ? rawContent.map((item) => item.text ?? "").join("")
-            : "";
-      const parsed = parseJsonFromText<T>(text);
+      const parsed = this.parser.extractJson<T>(result.text);
       if (!parsed) {
         throw new Error("Failed to parse model JSON response");
       }
@@ -89,16 +273,101 @@ export class AiOrchestrator {
       return {
         data: parsed,
         source: "model",
-        rawText: text
+        rawText: result.text
       };
-    } catch {
-      const fallback = options.fallback();
-      return {
-        data: fallback,
-        source: "fallback",
-        rawText: JSON.stringify(fallback, null, 2)
-      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return this.applyFallback(reason, options);
     }
+  }
+
+  async testConnection(profileOverride?: ModelProfile): Promise<ModelConnectionTestResult> {
+    const profile = profileOverride ?? (await this.getModelProfile());
+    const provider = profile.baseUrl.trim();
+    const checks: ModelConnectionCheck[] = [];
+
+    if (!provider || !profile.apiKey.trim()) {
+      checks.push({
+        target: "provider",
+        label: "Provider 配置",
+        status: "failed",
+        detail: "请先填写 API Base URL 和 API Key 后再测试。"
+      });
+      return buildConnectionSummary(provider, checks);
+    }
+
+    checks.push({
+      target: "provider",
+      label: "Provider 配置",
+      status: "success",
+      detail: "已检测到 API Base URL 和 API Key。"
+    });
+
+    const connection = {
+      baseUrl: provider,
+      apiKey: profile.apiKey.trim()
+    };
+    const chatProbeCache = new Map<string, ProbeOutcome>();
+    const roleChecks: Array<{ target: "planner" | "writer" | "auditor"; label: string; model: string }> = [
+      { target: "planner", label: "Planner 模型", model: profile.plannerModel.trim() },
+      { target: "writer", label: "Writer 模型", model: profile.writerModel.trim() },
+      { target: "auditor", label: "Auditor 模型", model: profile.auditorModel.trim() }
+    ];
+
+    for (const roleCheck of roleChecks) {
+      if (!roleCheck.model) {
+        checks.push({
+          target: roleCheck.target,
+          label: roleCheck.label,
+          status: "failed",
+          detail: "未配置模型名称，无法验证该路由。"
+        });
+        continue;
+      }
+
+      let probe = chatProbeCache.get(roleCheck.model);
+      if (!probe) {
+        probe = await this.runChatProbe(roleCheck.model, connection);
+        chatProbeCache.set(roleCheck.model, probe);
+      } else {
+        probe = {
+          ...probe,
+          reused: true,
+          detail: `复用同模型测试结果。${probe.detail}`
+        };
+      }
+
+      checks.push({
+        target: roleCheck.target,
+        label: roleCheck.label,
+        status: probe.ok ? "success" : "failed",
+        model: roleCheck.model,
+        latencyMs: probe.latencyMs,
+        detail: probe.detail
+      });
+    }
+
+    if (!profile.embeddingModel?.trim()) {
+      checks.push({
+        target: "embedding",
+        label: "Embedding 模型",
+        status: "skipped",
+        detail: "未配置 Embedding 模型，已跳过向量接口测试。"
+      });
+      return buildConnectionSummary(provider, checks);
+    }
+
+    const embeddingProbe = await this.runEmbeddingProbe(profile.embeddingModel.trim(), connection);
+    checks.push({
+      target: "embedding",
+      label: "Embedding 模型",
+      status: embeddingProbe.ok ? "success" : "failed",
+      model: profile.embeddingModel.trim(),
+      latencyMs: embeddingProbe.latencyMs,
+      detail: embeddingProbe.detail
+    });
+
+    return buildConnectionSummary(provider, checks);
   }
 
   async embedTexts(texts: string[]): Promise<number[][] | null> {
@@ -107,34 +376,87 @@ export class AiOrchestrator {
       return null;
     }
 
+    if (!this.adapter.embed) {
+      return null;
+    }
+
     try {
-      const response = await fetch(joinApiUrl(profile.baseUrl, "embeddings"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${profile.apiKey}`
-        },
-        body: JSON.stringify({
-          model: profile.embeddingModel,
-          input: texts
-        })
+      return await this.adapter.embed(texts, {
+        baseUrl: profile.baseUrl,
+        apiKey: profile.apiKey,
+        model: profile.embeddingModel
       });
-
-      if (!response.ok) {
-        throw new Error(`Embeddings request failed: ${response.status}`);
-      }
-
-      const payload = (await response.json()) as {
-        data?: Array<{ embedding: number[] }>;
-      };
-
-      if (!payload.data || payload.data.length === 0) {
-        return null;
-      }
-
-      return payload.data.map((item) => item.embedding);
     } catch {
       return null;
+    }
+  }
+
+  private async runChatProbe(model: string, connection: ProviderConnection): Promise<ProbeOutcome> {
+    const startedAt = Date.now();
+    try {
+      await this.adapter.chat(
+        {
+          model,
+          temperature: 0,
+          maxTokens: 8,
+          timeoutMs: 8_000,
+          messages: [
+            { role: "system", content: "You are a connectivity probe. Reply with OK." },
+            { role: "user", content: "Reply with OK." }
+          ]
+        },
+        connection
+      );
+
+      return {
+        ok: true,
+        detail: "聊天补全接口响应正常。",
+        latencyMs: Date.now() - startedAt
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        detail: formatProbeError("聊天补全接口测试失败", error),
+        latencyMs: Date.now() - startedAt
+      };
+    }
+  }
+
+  private async runEmbeddingProbe(model: string, connection: ProviderConnection): Promise<ProbeOutcome> {
+    if (!this.adapter.embed) {
+      return {
+        ok: false,
+        detail: "当前 Provider 适配器不支持 Embedding 测试。"
+      };
+    }
+
+    const startedAt = Date.now();
+    try {
+      const result = await this.adapter.embed(["连接测试"], {
+        ...connection,
+        model,
+        timeoutMs: 8_000
+      });
+
+      if (!result || result.length === 0 || result[0].length === 0) {
+        return {
+          ok: false,
+          detail: "Embedding 接口返回为空，未能确认向量能力可用。",
+          latencyMs: Date.now() - startedAt
+        };
+      }
+
+      return {
+        ok: true,
+        detail: `Embedding 接口响应正常，返回 ${result[0].length} 维向量。`,
+        latencyMs: Date.now() - startedAt
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        detail: formatProbeError("Embedding 接口测试失败", error),
+        latencyMs: Date.now() - startedAt
+      };
     }
   }
 }
@@ -155,6 +477,125 @@ function toTemperatureKey(role: ModelRole): keyof ModelProfile["temperaturePolic
 function joinApiUrl(baseUrl: string, path: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
   return `${trimmed}/${path.replace(/^\/+/, "")}`;
+}
+
+function buildConnectionSummary(provider: string, checks: ModelConnectionCheck[]): ModelConnectionTestResult {
+  const failedCount = checks.filter((check) => check.status === "failed").length;
+  const successCount = checks.filter((check) => check.status === "success").length;
+  const skippedCount = checks.filter((check) => check.status === "skipped").length;
+
+  return {
+    ok: failedCount === 0 && successCount > 0,
+    provider,
+    checkedAt: nowIso(),
+    summary:
+      failedCount === 0
+        ? `连通性测试通过，共 ${successCount} 项成功${skippedCount > 0 ? `，${skippedCount} 项跳过` : ""}。`
+        : `连通性测试发现 ${failedCount} 项异常，请检查下方详情。`,
+    checks
+  };
+}
+
+function formatProbeError(prefix: string, error: unknown): string {
+  return `${prefix}：${error instanceof Error ? error.message : String(error)}`;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
+  if (!timeoutMs) {
+    return fetch(url, init);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/* ────────────── SSE Stream Consumer ────────────── */
+
+/**
+ * Reads an OpenAI-compatible SSE stream (`text/event-stream`) and
+ * concatenates all `delta.content` chunks into a single result.
+ *
+ * Handles:
+ * - `data: [DONE]` terminator
+ * - Multi-line SSE frames split across network chunks
+ * - Optional `usage` object in the final chunk (OpenAI >=2024-01)
+ */
+async function consumeSSEStream(body: ReadableStream<Uint8Array>): Promise<ChatCompletionResult> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let fullText = "";
+  let finishReason: string | undefined;
+  let usage: ChatCompletionResult["usage"] | undefined;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE frames are separated by double newlines
+      const frames = buffer.split(/\n\n/);
+      // Keep the last (possibly incomplete) frame in the buffer
+      buffer = frames.pop() ?? "";
+
+      for (const frame of frames) {
+        for (const line of frame.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") continue;
+
+          try {
+            const chunk = JSON.parse(payload) as {
+              choices?: Array<{
+                delta?: { content?: string };
+                finish_reason?: string | null;
+              }>;
+              usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+            };
+
+            const delta = chunk.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullText += delta;
+            }
+
+            if (chunk.choices?.[0]?.finish_reason) {
+              finishReason = chunk.choices[0].finish_reason;
+            }
+
+            if (chunk.usage) {
+              usage = {
+                promptTokens: chunk.usage.prompt_tokens,
+                completionTokens: chunk.usage.completion_tokens,
+                totalTokens: chunk.usage.total_tokens
+              };
+            }
+          } catch {
+            // Skip malformed JSON chunks
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return { text: fullText, finishReason, usage };
 }
 
 function parseJsonFromText<T>(text: string): T | null {
@@ -224,7 +665,7 @@ export function mockStoryBible(snapshot: ProjectSnapshot): StoryBible {
     world: [
       {
         title: "表层秩序",
-        summary: `故事的表层是一套看似稳定的${genre}社会结构，但资源、信息和权力被少数节点掌控。`,
+        summary: `故事以"${premise}"为核心前提，表层是一套看似稳定的${genre}社会结构，但资源、信息和权力被少数节点掌控。`,
         rules: ["普通人只知其表，不知其里", "每次突破都要付出明确代价", "关键信息只能通过行动获得"]
       },
       {

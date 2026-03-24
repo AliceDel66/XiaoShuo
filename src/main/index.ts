@@ -35,7 +35,8 @@ app.whenReady().then(async () => {
     ? join(process.resourcesPath, "builtin-corpora")
     : join(process.cwd(), "resources", "builtin-corpora");
 
-  workbenchService = new WorkbenchService(dataDirectory, projectsDirectory, builtinCorpusDirectory);
+  const fallbackPolicy = app.isPackaged ? "deny" as const : "allow" as const;
+  workbenchService = new WorkbenchService(dataDirectory, projectsDirectory, builtinCorpusDirectory, fallbackPolicy);
   await workbenchService.init();
   registerIpc(workbenchService);
   await createWindow();

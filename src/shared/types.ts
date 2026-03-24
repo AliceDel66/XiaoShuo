@@ -71,6 +71,27 @@ export interface ModelProfile {
   temperaturePolicy: TemperaturePolicy;
 }
 
+export type ModelConnectionCheckTarget = "provider" | "planner" | "writer" | "auditor" | "embedding";
+
+export type ModelConnectionCheckStatus = "success" | "failed" | "skipped";
+
+export interface ModelConnectionCheck {
+  target: ModelConnectionCheckTarget;
+  label: string;
+  status: ModelConnectionCheckStatus;
+  detail: string;
+  model?: string;
+  latencyMs?: number;
+}
+
+export interface ModelConnectionTestResult {
+  ok: boolean;
+  provider: string;
+  checkedAt: string;
+  summary: string;
+  checks: ModelConnectionCheck[];
+}
+
 export interface PromptTemplate {
   systemTemplate: string;
   userTemplate: string;
@@ -372,6 +393,8 @@ export interface PreviewCandidate {
   format: ArtifactFormat;
   renderedContent: string;
   structuredPayload?: unknown;
+  /** Whether this candidate was produced by the model or by local fallback/mock. */
+  source?: "model" | "fallback";
   createdAt: string;
 }
 
@@ -479,6 +502,7 @@ export type GenerationEvent =
 export interface AppApi {
   getDashboardData: () => Promise<DashboardData>;
   saveModelProfile: (profile: ModelProfile) => Promise<ModelProfile>;
+  testModelProfileConnection: (profile: ModelProfile) => Promise<ModelConnectionTestResult>;
   saveWorkbenchSettings: (settings: WorkbenchSettings) => Promise<WorkbenchSettings>;
   createProject: (input: CreateProjectInput) => Promise<ProjectSnapshot>;
   getProject: (projectId: string) => Promise<ProjectSnapshot>;

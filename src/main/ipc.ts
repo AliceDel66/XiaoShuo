@@ -18,6 +18,10 @@ export function registerIpc(service: WorkbenchService): void {
     service.saveModelProfile(profile)
   );
   ipcMain.handle(
+    "workbench:testModelProfileConnection",
+    (_event, profile: Parameters<AppApi["testModelProfileConnection"]>[0]) => service.testModelProfileConnection(profile)
+  );
+  ipcMain.handle(
     "workbench:saveWorkbenchSettings",
     (_event, settings: Parameters<AppApi["saveWorkbenchSettings"]>[0]) => service.saveWorkbenchSettings(settings)
   );
@@ -73,6 +77,25 @@ export function registerIpc(service: WorkbenchService): void {
     }
     return result.filePaths[0];
   });
+
+  // Phase 2: Story Memory IPC channels
+  ipcMain.handle("workbench:getStoryMemory", (_event, projectId: string) =>
+    service.getStoryMemory(projectId)
+  );
+  ipcMain.handle("workbench:getPendingPatches", (_event, projectId: string) =>
+    service.getPendingPatches(projectId)
+  );
+  ipcMain.handle(
+    "workbench:reviewPatch",
+    (_event, projectId: string, patchId: string, decision: "confirm" | "reject") =>
+      service.reviewPatch(projectId, patchId, decision)
+  );
+  ipcMain.handle("workbench:rollbackMemory", (_event, projectId: string, count: number) =>
+    service.rollbackMemory(projectId, count)
+  );
+  ipcMain.handle("workbench:compactMemory", (_event, projectId: string) =>
+    service.compactMemory(projectId)
+  );
 }
 
 export { generationEventChannel };

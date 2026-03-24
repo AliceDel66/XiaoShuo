@@ -5,6 +5,7 @@ import { generationEventChannel } from "./ipc";
 const api: AppApi = {
   getDashboardData: () => ipcRenderer.invoke("workbench:getDashboardData"),
   saveModelProfile: (profile) => ipcRenderer.invoke("workbench:saveModelProfile", profile),
+  testModelProfileConnection: (profile) => ipcRenderer.invoke("workbench:testModelProfileConnection", profile),
   saveWorkbenchSettings: (settings) => ipcRenderer.invoke("workbench:saveWorkbenchSettings", settings),
   createProject: (input) => ipcRenderer.invoke("workbench:createProject", input),
   getProject: (projectId) => ipcRenderer.invoke("workbench:getProject", projectId),

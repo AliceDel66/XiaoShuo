@@ -46,12 +46,17 @@ interface PreparedGenerationTarget {
 
 export class WorkflowService {
   private promptTemplates: PromptTemplateMap = DEFAULT_PROMPT_TEMPLATES;
+  private storyMemoryService: StoryMemoryService | null = null;
 
   constructor(
     private readonly repository: ProjectRepository,
     private readonly aiOrchestrator: AiOrchestrator,
     private readonly exportService: ExportService
   ) {}
+
+  setStoryMemoryService(service: StoryMemoryService): void {
+    this.storyMemoryService = service;
+  }
 
   setPromptTemplates(templates: PromptTemplateMap): void {
     this.promptTemplates = templates;
@@ -89,7 +94,8 @@ export class WorkflowService {
     input: WorkflowExecutionInput,
     referenceHints: ReferenceCorpusManifest[],
     referenceMatches: SearchResult[],
-    prepared: PreparedGenerationTarget
+    prepared: PreparedGenerationTarget,
+    memoryContext?: AssembledMemoryContext | null
   ): GenerationPromptTrace {
     const referenceContext = buildReferenceContext(referenceHints, referenceMatches);
     const projectContextSummary = buildProjectContextSummary(snapshot, prepared);
@@ -111,15 +117,22 @@ export class WorkflowService {
       projectContextSummary: projectContextSummary.join(" | "),
       manifestJson: JSON.stringify(snapshot.manifest),
       premiseCardJson: JSON.stringify(snapshot.premiseCard),
-      storyBibleJson: JSON.stringify(snapshot.storyBible),
+      // When memory context is available, use it instead of raw JSON dumps
+      storyBibleJson: memoryContext ? "" : JSON.stringify(snapshot.storyBible),
       chapterOutlineJson: JSON.stringify(prepared.targetOutline ?? null),
       draftJson: JSON.stringify(prepared.targetDraft ?? null),
       existingChapterOutlinesJson: JSON.stringify(snapshot.outlines.filter((item) => item.level === "chapter")),
       latestOutlinesJson: JSON.stringify(snapshot.outlines.slice(-12)),
-      latestDraftsJson: JSON.stringify(
+      latestDraftsJson: memoryContext ? "" : JSON.stringify(
         snapshot.drafts.slice(-6).map((draft) => ({ ...draft, markdown: excerpt(draft.markdown, 1800) }))
       ),
-      latestStatesJson: JSON.stringify(snapshot.chapterStates.slice(-6))
+      latestStatesJson: memoryContext ? "" : JSON.stringify(snapshot.chapterStates.slice(-6)),
+      // New memory context variables
+      memoryLongTerm: memoryContext?.longTermContext ?? "",
+      memoryMidTerm: memoryContext?.midTermContext ?? "",
+      memoryShortTerm: memoryContext?.shortTermContext ?? "",
+      memoryWorking: memoryContext?.workingContext ?? "",
+      memoryFull: memoryContext?.fullContext ?? "",
     };
 
     return {
@@ -161,6 +174,7 @@ export class WorkflowService {
             format: "yaml",
             renderedContent: stringifyYaml(result.data),
             structuredPayload: result.data,
+            source: result.source,
             createdAt: nowIso()
           },
           promptTrace,
@@ -183,6 +197,7 @@ export class WorkflowService {
             format: "yaml",
             renderedContent: stringifyYaml(result.data),
             structuredPayload: result.data,
+            source: result.source,
             createdAt: nowIso()
           },
           promptTrace,
@@ -205,6 +220,7 @@ export class WorkflowService {
             format: "yaml",
             renderedContent: stringifyYaml(result.data),
             structuredPayload: result.data,
+            source: result.source,
             createdAt: nowIso()
           },
           promptTrace,
@@ -227,6 +243,7 @@ export class WorkflowService {
             format: "yaml",
             renderedContent: stringifyYaml(result.data),
             structuredPayload: result.data,
+            source: result.source,
             createdAt: nowIso()
           },
           promptTrace,
@@ -258,6 +275,7 @@ export class WorkflowService {
             format: "markdown",
             renderedContent: draft.markdown,
             structuredPayload: draft,
+            source: result.source,
             createdAt: nowIso()
           },
           promptTrace,
@@ -280,6 +298,7 @@ export class WorkflowService {
             format: "yaml",
             renderedContent: stringifyYaml(result.data),
             structuredPayload: result.data,
+            source: result.source,
             createdAt: nowIso()
           },
           promptTrace,
@@ -303,6 +322,7 @@ export class WorkflowService {
             format: "yaml",
             renderedContent: buildAuditPreviewText(report),
             structuredPayload: report,
+            source: result.source,
             createdAt: nowIso()
           },
           promptTrace,
@@ -359,7 +379,8 @@ export class WorkflowService {
   async execute(
     snapshot: ProjectSnapshot,
     input: WorkflowExecutionInput,
-    referenceHints: ReferenceCorpusManifest[]
+    referenceHints: ReferenceCorpusManifest[],
+    referenceMatches: SearchResult[] = []
   ): Promise<WorkflowResult> {
     if (input.action === "export-project") {
       const exportPath = await this.runExport(snapshot, inferExportFormat(input.notes));
@@ -384,7 +405,7 @@ export class WorkflowService {
       };
     }
 
-    const generated = await this.generateCandidate(snapshot, input, referenceHints, [], prepared, 1);
+    const generated = await this.generateCandidate(snapshot, input, referenceHints, referenceMatches, prepared, 1);
     const updatedProject = await this.applyConfirmedArtifact(snapshot, prepared.artifactRef, generated.candidate);
     updatedProject.unresolvedWarnings = evaluateOutstandingWarnings(updatedProject);
 

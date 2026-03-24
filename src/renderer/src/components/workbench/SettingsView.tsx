@@ -1,9 +1,11 @@
 import { Cpu, Download, Globe, MessageSquare, Sliders } from "lucide-react";
 import { useState } from "react";
+import type { ModelConnectionCheck, ModelConnectionTestResult } from "@shared/types";
 import type { WorkbenchHookResult } from "./types";
 import { EXPORT_FORMAT_LABELS, WORKFLOW_ACTION_LABELS } from "./view-model";
 import {
   Field,
+  formatDateTime,
   GhostButton,
   Input,
   PanelHeader,
@@ -20,6 +22,8 @@ export function SettingsView({ state, actions }: WorkbenchHookResult) {
   const [tab, setTab] = useState<"general" | "ai" | "prompts" | "export">("general");
   const settings = state.settingsDraft;
   const modelProfile = state.modelProfileDraft;
+  const connectionTest = state.connectionTestResult;
+  const isTestingConnection = state.busy["test-model-profile-connection"];
 
   return (
     <div className="flex flex-1 overflow-hidden bg-[#0f111a]">
@@ -253,15 +257,16 @@ export function SettingsView({ state, actions }: WorkbenchHookResult) {
                       />
                     </Field>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <StatusPill tone={modelProfile.baseUrl && modelProfile.apiKey ? "success" : "warning"}>
                       {modelProfile.baseUrl && modelProfile.apiKey ? "已配置 Provider" : "尚未完整配置"}
                     </StatusPill>
-                    <GhostButton>
+                    <GhostButton disabled={isTestingConnection} onClick={() => void actions.testModelProfileConnection()}>
                       <Globe size={14} className="mr-1" />
-                      连通性测试稍后补充
+                      {isTestingConnection ? "正在测试连通性..." : "测试连通性"}
                     </GhostButton>
                   </div>
+                  {connectionTest ? <ConnectionTestCard result={connectionTest} /> : null}
                 </div>
               </ShellPanel>
 
@@ -537,4 +542,59 @@ function ModelRow({
       </div>
     </div>
   );
+}
+
+function ConnectionTestCard({ result }: { result: ModelConnectionTestResult }) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-[#0d1018] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-100">{result.summary}</div>
+          <div className="mt-1 text-xs text-slate-500">
+            {result.provider || "未填写 Provider 地址"} · {formatDateTime(result.checkedAt)}
+          </div>
+        </div>
+        <StatusPill tone={result.ok ? "success" : "danger"}>{result.ok ? "测试通过" : "存在异常"}</StatusPill>
+      </div>
+      <div className="mt-4 space-y-3">
+        {result.checks.map((check) => (
+          <div key={`${check.target}-${check.model ?? "none"}`} className="rounded-2xl border border-white/6 bg-white/[0.03] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-medium text-slate-200">
+                {check.label}
+                {check.model ? <span className="ml-2 text-slate-500">{check.model}</span> : null}
+              </div>
+              <div className="flex items-center gap-2">
+                {typeof check.latencyMs === "number" ? (
+                  <span className="text-xs text-slate-500">{check.latencyMs} ms</span>
+                ) : null}
+                <StatusPill tone={connectionTone(check)}>{connectionLabel(check)}</StatusPill>
+              </div>
+            </div>
+            <div className="mt-2 text-xs leading-5 text-slate-400">{check.detail}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function connectionTone(check: ModelConnectionCheck) {
+  if (check.status === "success") {
+    return "success" as const;
+  }
+  if (check.status === "skipped") {
+    return "warning" as const;
+  }
+  return "danger" as const;
+}
+
+function connectionLabel(check: ModelConnectionCheck) {
+  if (check.status === "success") {
+    return "正常";
+  }
+  if (check.status === "skipped") {
+    return "已跳过";
+  }
+  return "失败";
 }

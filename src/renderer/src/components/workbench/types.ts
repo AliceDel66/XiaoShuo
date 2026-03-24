@@ -6,6 +6,7 @@ import type {
   CreateProjectInput,
   DashboardData,
   GenerationJob,
+  ModelConnectionTestResult,
   ModelProfile,
   OutlinePacket,
   PreviewCandidate,
@@ -79,6 +80,7 @@ export interface WorkbenchState {
   drawer: DrawerState;
   projectForm: CreateProjectInput;
   modelProfileDraft: ModelProfile;
+  connectionTestResult: ModelConnectionTestResult | null;
   settingsDraft: WorkbenchSettings;
   workflowDraft: WorkflowDraftState;
   activeJob: GenerationJob | null;
@@ -122,6 +124,7 @@ export interface WorkbenchActions {
   saveDrawerDocument: () => Promise<void>;
   exportProject: (format: "markdown" | "txt" | "epub") => Promise<void>;
   saveModelProfile: () => Promise<void>;
+  testModelProfileConnection: () => Promise<void>;
   saveWorkbenchSettings: () => Promise<void>;
   resetPromptTemplate: (action: WorkflowAction) => void;
   refresh: () => Promise<void>;

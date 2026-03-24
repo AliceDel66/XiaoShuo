@@ -5,11 +5,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchApp } from "../src/renderer/src/components/workbench/WorkbenchApp";
-import { DEFAULT_MODEL_PROFILE, DEFAULT_WORKBENCH_SETTINGS } from "../src/shared/defaults";
+import { SettingsView } from "../src/renderer/src/components/workbench/SettingsView";
+import type { WorkbenchHookResult } from "../src/renderer/src/components/workbench/types";
+import { DEFAULT_MODEL_PROFILE, DEFAULT_WORKBENCH_SETTINGS, createProjectInputFromDefaults } from "../src/shared/defaults";
 import type {
   AppApi,
   ArtifactEditorDocument,
   DashboardData,
+  ModelConnectionTestResult,
   OutlinePacket,
   PreviewSession,
   ProjectManifest,
@@ -85,9 +88,9 @@ describe("WorkbenchApp renderer", () => {
     render(<WorkbenchApp api={api} />);
 
     fireEvent.click(screen.getByTitle("沉浸写作"));
-    expect(await screen.findByText("生成本章草稿")).toBeInTheDocument();
+    expect(await screen.findByText("AI 生成本章")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "生成本章草稿" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 生成本章" }));
     await waitFor(() => {
       expect(api.startGeneration).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -98,14 +101,46 @@ describe("WorkbenchApp renderer", () => {
       );
     });
   });
+
+  it("runs model connectivity tests from settings and renders the result summary", async () => {
+    const connectionResult: ModelConnectionTestResult = {
+      ok: true,
+      provider: "https://api.example.com/v1",
+      checkedAt: "2026-03-25T00:00:00.000Z",
+      summary: "连通性测试通过，共 4 项成功。",
+      checks: [
+        { target: "provider", label: "Provider 配置", status: "success", detail: "已检测到 API Base URL 和 API Key。" },
+        { target: "planner", label: "Planner 模型", status: "success", model: "gpt-5.4", detail: "聊天补全接口响应正常。", latencyMs: 120 },
+        { target: "writer", label: "Writer 模型", status: "success", model: "gpt-5.4", detail: "复用同模型测试结果。聊天补全接口响应正常。", latencyMs: 120 },
+        { target: "auditor", label: "Auditor 模型", status: "success", model: "gpt-5.4", detail: "复用同模型测试结果。聊天补全接口响应正常。", latencyMs: 120 },
+        { target: "embedding", label: "Embedding 模型", status: "skipped", detail: "未配置 Embedding 模型，已跳过向量接口测试。" }
+      ]
+    };
+    const testModelProfileConnection = vi.fn(async () => undefined);
+    const hook = createSettingsHookResult(connectionResult, testModelProfileConnection);
+
+    render(<SettingsView state={hook.state} actions={hook.actions} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "AI 模型与接口" }));
+    const testButtonLabel = screen.getByText("测试连通性");
+    fireEvent.click(testButtonLabel.closest("button") as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(testModelProfileConnection).toHaveBeenCalledTimes(1);
+    });
+
+    expect(await screen.findByText("连通性测试通过，共 4 项成功。")).toBeInTheDocument();
+    expect(screen.getByText("Planner 模型")).toBeInTheDocument();
+  });
 });
 
 function createApi(
   snapshot: ProjectSnapshot,
-  options: { autoSaveMs?: number } = {}
+  options: { autoSaveMs?: number; connectionResult?: ModelConnectionTestResult } = {}
 ): AppApi & {
   startGeneration: ReturnType<typeof vi.fn>;
   saveArtifactEdits: ReturnType<typeof vi.fn>;
+  testModelProfileConnection: ReturnType<typeof vi.fn>;
 } {
   const dashboardData: DashboardData = {
     modelProfile: DEFAULT_MODEL_PROFILE,
@@ -142,10 +177,12 @@ function createApi(
     }
     return snapshot;
   });
+  const testModelProfileConnection = vi.fn(async () => options.connectionResult ?? emptyConnectionResult());
 
   return {
     getDashboardData: vi.fn(async () => dashboardData),
     saveModelProfile: vi.fn(async (profile) => profile),
+    testModelProfileConnection,
     saveWorkbenchSettings: vi.fn(async (settings) => settings),
     createProject: vi.fn(async () => snapshot),
     getProject: vi.fn(async () => snapshot),
@@ -168,6 +205,105 @@ function createApi(
     executeWorkflow: vi.fn(async () => {
       throw new Error("not needed");
     })
+  };
+}
+
+function emptyConnectionResult(): ModelConnectionTestResult {
+  return {
+    ok: false,
+    provider: "",
+    checkedAt: "2026-03-25T00:00:00.000Z",
+    summary: "连通性测试发现 1 项异常，请检查下方详情。",
+    checks: [
+      {
+        target: "provider",
+        label: "Provider 配置",
+        status: "failed",
+        detail: "请先填写 API Base URL 和 API Key 后再测试。"
+      }
+    ]
+  };
+}
+
+function createSettingsHookResult(
+  connectionResult: ModelConnectionTestResult,
+  testModelProfileConnection: ReturnType<typeof vi.fn>
+): WorkbenchHookResult {
+  const asyncNoop = vi.fn(async () => undefined);
+  const asyncNull = vi.fn(async () => null);
+  const noop = vi.fn();
+
+  return {
+    state: {
+      loading: false,
+      error: null,
+      notice: null,
+      activeView: "settings",
+      dashboardData: null,
+      selectedProject: null,
+      selectedProjectId: null,
+      selectedCorpusIds: [],
+      searchQuery: "",
+      searchResults: [],
+      activeCandidateId: null,
+      drawer: null,
+      projectForm: createProjectInputFromDefaults(),
+      modelProfileDraft: {
+        ...DEFAULT_MODEL_PROFILE,
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "sk-test",
+        plannerModel: "gpt-5.4",
+        writerModel: "gpt-5.4",
+        auditorModel: "gpt-5.4"
+      },
+      connectionTestResult: connectionResult,
+      settingsDraft: DEFAULT_WORKBENCH_SETTINGS,
+      workflowDraft: {
+        volumeNumber: 1,
+        chapterNumber: 1,
+        scope: "chapter",
+        notes: ""
+      },
+      activeJob: null,
+      activePreviewSession: null,
+      selectedCandidate: null,
+      busy: {}
+    },
+    actions: {
+      setActiveView: noop,
+      setSearchQuery: noop,
+      setActiveCandidateId: noop,
+      setProjectForm: noop,
+      setModelProfileDraft: noop,
+      setSettingsDraft: noop,
+      setWorkflowDraft: noop,
+      selectProject: asyncNoop,
+      toggleCorpus: noop,
+      importCorpus: asyncNoop,
+      createProject: asyncNoop,
+      archiveProject: asyncNoop,
+      restoreProject: asyncNoop,
+      deleteProject: asyncNoop,
+      startWorkflow: asyncNoop,
+      confirmCandidate: asyncNoop,
+      regenerateCandidate: asyncNoop,
+      discardSession: asyncNoop,
+      openArtifact: asyncNoop,
+      loadArtifactDocument: asyncNull,
+      saveArtifactDocument: asyncNull,
+      createEmptyDraft: asyncNoop,
+      openPromptDrawer: noop,
+      openContextDrawer: noop,
+      closeDrawer: noop,
+      updateDrawerDocument: noop,
+      saveDrawerDocument: asyncNoop,
+      exportProject: asyncNoop,
+      saveModelProfile: asyncNoop,
+      testModelProfileConnection,
+      saveWorkbenchSettings: asyncNoop,
+      resetPromptTemplate: noop,
+      refresh: asyncNoop
+    }
   };
 }
 

@@ -19,7 +19,7 @@ import type {
   WorkbenchSettings,
   WorkflowExecutionInput
 } from "../../shared/types";
-import { AiOrchestrator } from "./ai-orchestrator";
+import { AiOrchestrator, type FallbackPolicy } from "./ai-orchestrator";
 import { CorpusService } from "./corpus-service";
 import { ExportService } from "./export-service";
 import { deepClone, ensureDir, nowIso, readYaml, writeYaml } from "./helpers";
@@ -28,6 +28,8 @@ import { LibraryDatabase } from "./library-database";
 import { PreviewSessionService } from "./preview-session-service";
 import { ProjectRepository } from "./project-repository";
 import { evaluateOutstandingWarnings, WorkflowService } from "./workflow-service";
+import { StoryMemoryService } from "./story-memory-service";
+import type { MemoryPatch, StoryMemory } from "../../shared/memory-types";
 
 export class WorkbenchService implements AppApi {
   private database!: LibraryDatabase;
@@ -46,6 +48,8 @@ export class WorkbenchService implements AppApi {
 
   private generationCoordinator!: GenerationCoordinator;
 
+  private storyMemoryService!: StoryMemoryService;
+
   private readonly modelProfilePath: string;
 
   private readonly workbenchSettingsPath: string;
@@ -53,12 +57,13 @@ export class WorkbenchService implements AppApi {
   constructor(
     private readonly dataDirectory: string,
     private readonly defaultProjectsDirectory: string,
-    private readonly builtinCorpusDirectory: string
+    private readonly builtinCorpusDirectory: string,
+    fallbackPolicy: FallbackPolicy = "allow"
   ) {
     this.projectRepository = new ProjectRepository(defaultProjectsDirectory);
     this.modelProfilePath = join(dataDirectory, "settings", "model-profile.yaml");
     this.workbenchSettingsPath = join(dataDirectory, "settings", "workbench-settings.yaml");
-    this.aiOrchestrator = new AiOrchestrator(() => this.getModelProfileInternal());
+    this.aiOrchestrator = new AiOrchestrator(() => this.getModelProfileInternal(), fallbackPolicy);
   }
 
   async init(): Promise<void> {
@@ -66,6 +71,8 @@ export class WorkbenchService implements AppApi {
     await mkdir(this.defaultProjectsDirectory, { recursive: true });
     this.database = new LibraryDatabase(join(this.dataDirectory, "library.sqlite"));
     this.workflowService = new WorkflowService(this.projectRepository, this.aiOrchestrator, this.exportService);
+    this.storyMemoryService = new StoryMemoryService(this.projectRepository);
+    this.workflowService.setStoryMemoryService(this.storyMemoryService);
     this.corpusService = new CorpusService(this.database, this.aiOrchestrator, this.builtinCorpusDirectory);
     this.previewSessionService = new PreviewSessionService(join(this.dataDirectory, "preview-sessions"));
     await this.previewSessionService.init();
@@ -115,17 +122,13 @@ export class WorkbenchService implements AppApi {
   }
 
   async saveModelProfile(profile: ModelProfile): Promise<ModelProfile> {
-    const normalized: ModelProfile = {
-      ...DEFAULT_MODEL_PROFILE,
-      ...profile,
-      embeddingModel: profile.embeddingModel ?? "",
-      temperaturePolicy: {
-        ...DEFAULT_MODEL_PROFILE.temperaturePolicy,
-        ...profile.temperaturePolicy
-      }
-    };
+    const normalized = normalizeModelProfile(profile);
     await writeYaml(this.modelProfilePath, normalized);
     return normalized;
+  }
+
+  async testModelProfileConnection(profile: ModelProfile) {
+    return this.aiOrchestrator.testConnection(normalizeModelProfile(profile));
   }
 
   async saveWorkbenchSettings(settings: WorkbenchSettings): Promise<WorkbenchSettings> {
@@ -213,10 +216,8 @@ export class WorkbenchService implements AppApi {
 
   async executeWorkflow(input: WorkflowExecutionInput) {
     const snapshot = await this.getProject(input.projectId);
-    const referenceHints = this.database
-      .listCorpora()
-      .filter((corpus) => input.referenceCorpusIds?.includes(corpus.corpusId));
-    const result = await this.workflowService.execute(snapshot, input, referenceHints);
+    const { referenceHints, referenceMatches } = this.loadReferenceContext(snapshot, input);
+    const result = await this.workflowService.execute(snapshot, input, referenceHints, referenceMatches);
     this.database.upsertProject(result.updatedProject.manifest);
     return result;
   }
@@ -279,6 +280,56 @@ export class WorkbenchService implements AppApi {
       status: "confirmed",
       selectedCandidateId: candidateId
     }));
+
+    // Phase 2: Extract memory patch after chapter-related confirmations
+    if (
+      session.action === "update-chapter-state" &&
+      candidate.structuredPayload
+    ) {
+      try {
+        const rootPath = updatedProject.manifest.rootPath;
+        const memory = await this.storyMemoryService.loadMemory(
+          rootPath,
+          updatedProject.manifest.projectId
+        );
+        const stateDelta = candidate.structuredPayload as import("../../shared/types").ChapterStateDelta;
+        const patch = this.storyMemoryService.extractPatchFromStateDelta(stateDelta, memory);
+
+        if (patch.operations.length > 0) {
+          const validation = this.storyMemoryService.validatePatch(patch, memory);
+          if (validation.valid && validation.conflicts.length === 0) {
+            // Auto-apply if no conflicts
+            const newMemory = this.storyMemoryService.applyPatch(patch, memory);
+            await this.storyMemoryService.saveMemory(rootPath, newMemory);
+          } else {
+            // Save as pending for human review
+            patch.conflicts = validation.conflicts;
+            await this.storyMemoryService.savePendingPatch(rootPath, patch);
+          }
+        }
+      } catch (error) {
+        // Memory patch extraction is non-blocking
+        console.warn("[WorkbenchService] Memory patch extraction failed:", error);
+      }
+    }
+
+    // Phase 2: Bible-sync when story-bible is confirmed
+    if (session.action === "generate-story-bible" && candidate.structuredPayload) {
+      try {
+        const rootPath = updatedProject.manifest.rootPath;
+        const memory = await this.storyMemoryService.loadMemory(
+          rootPath,
+          updatedProject.manifest.projectId
+        );
+        const bible = candidate.structuredPayload as import("../../shared/types").StoryBible;
+        const patch = this.storyMemoryService.initFromBible(memory, bible);
+        const newMemory = this.storyMemoryService.applyPatch(patch, memory);
+        await this.storyMemoryService.saveMemory(rootPath, newMemory);
+      } catch (error) {
+        console.warn("[WorkbenchService] Bible-sync failed:", error);
+      }
+    }
+
     return updatedProject;
   }
 
@@ -359,8 +410,7 @@ export class WorkbenchService implements AppApi {
     return settings;
   }
 
-  private async loadGenerationContext(input: WorkflowExecutionInput) {
-    const snapshot = await this.getProject(input.projectId);
+  private loadReferenceContext(snapshot: ProjectSnapshot, input: WorkflowExecutionInput) {
     const referenceHints = this.database
       .listCorpora()
       .filter((corpus) => input.referenceCorpusIds?.includes(corpus.corpusId));
@@ -373,13 +423,94 @@ export class WorkbenchService implements AppApi {
             limit: 4
           })
         : [];
+    return { referenceHints, referenceMatches };
+  }
+
+  private async loadGenerationContext(input: WorkflowExecutionInput) {
+    const snapshot = await this.getProject(input.projectId);
+    const { referenceHints, referenceMatches } = this.loadReferenceContext(snapshot, input);
+
+    // Phase 2: Load memory context for generation
+    let memoryContext = null;
+    try {
+      const memory = await this.storyMemoryService.loadMemory(
+        snapshot.manifest.rootPath,
+        snapshot.manifest.projectId
+      );
+      if (memory.version > 0) {
+        const budget = this.storyMemoryService.getContextBudget(input.action);
+        memoryContext = this.storyMemoryService.assembleContext(
+          memory,
+          input.action,
+          { volumeNumber: input.volumeNumber ?? 1, chapterNumber: input.chapterNumber },
+          budget
+        );
+      }
+    } catch (error) {
+      console.warn("[WorkbenchService] Memory context loading failed, falling back to legacy:", error);
+    }
 
     return {
       snapshot,
       referenceHints,
-      referenceMatches
+      referenceMatches,
+      memoryContext
     };
   }
+
+  // ── Phase 2: Story Memory API methods ─────────────
+
+  async getStoryMemory(projectId: string): Promise<StoryMemory> {
+    const manifest = this.database.getProjectManifest(projectId);
+    if (!manifest) throw new Error(`Project not found: ${projectId}`);
+    return this.storyMemoryService.loadMemory(manifest.rootPath, projectId);
+  }
+
+  async getPendingPatches(projectId: string): Promise<MemoryPatch[]> {
+    const manifest = this.database.getProjectManifest(projectId);
+    if (!manifest) throw new Error(`Project not found: ${projectId}`);
+    return this.storyMemoryService.loadPendingPatches(manifest.rootPath);
+  }
+
+  async reviewPatch(
+    projectId: string,
+    patchId: string,
+    decision: "confirm" | "reject"
+  ): Promise<StoryMemory> {
+    const manifest = this.database.getProjectManifest(projectId);
+    if (!manifest) throw new Error(`Project not found: ${projectId}`);
+    return this.storyMemoryService.reviewPatch(manifest.rootPath, projectId, patchId, decision);
+  }
+
+  async rollbackMemory(projectId: string, count: number): Promise<StoryMemory> {
+    const manifest = this.database.getProjectManifest(projectId);
+    if (!manifest) throw new Error(`Project not found: ${projectId}`);
+    const memory = await this.storyMemoryService.loadMemory(manifest.rootPath, projectId);
+    const rolledBack = this.storyMemoryService.rollbackPatches(memory, count);
+    await this.storyMemoryService.saveMemory(manifest.rootPath, rolledBack);
+    return rolledBack;
+  }
+
+  async compactMemory(projectId: string): Promise<StoryMemory> {
+    const manifest = this.database.getProjectManifest(projectId);
+    if (!manifest) throw new Error(`Project not found: ${projectId}`);
+    const memory = await this.storyMemoryService.loadMemory(manifest.rootPath, projectId);
+    const compacted = this.storyMemoryService.compactMemory(memory);
+    await this.storyMemoryService.saveMemory(manifest.rootPath, compacted);
+    return compacted;
+  }
+}
+
+function normalizeModelProfile(profile: ModelProfile): ModelProfile {
+  return {
+    ...DEFAULT_MODEL_PROFILE,
+    ...profile,
+    embeddingModel: profile.embeddingModel ?? "",
+    temperaturePolicy: {
+      ...DEFAULT_MODEL_PROFILE.temperaturePolicy,
+      ...profile.temperaturePolicy
+    }
+  };
 }
 
 function normalizeWorkbenchSettings(settings: WorkbenchSettings): WorkbenchSettings {

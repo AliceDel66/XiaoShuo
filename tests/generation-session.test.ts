@@ -60,16 +60,18 @@ describe("Generation preview workflow", () => {
       action: "generate-project-setup"
     });
 
-    await expect(
-      service.startGeneration({
-        projectId: project.manifest.projectId,
-        action: "generate-project-setup"
-      })
-    ).rejects.toThrow(/任务运行中|任务运行/);
+    // Calling startGeneration again while the first job is still running
+    // should cancel the old job and start a new one (not throw).
+    const second = await service.startGeneration({
+      projectId: project.manifest.projectId,
+      action: "generate-project-setup"
+    });
 
-    await waitForSession(service, first.sessionId, (current) => current.candidates.length === 1);
-    await service.regenerateCandidate(first.sessionId);
-    const regenerated = await waitForSession(service, first.sessionId, (current) => current.candidates.length === 2);
+    expect(second.jobId).not.toBe(first.jobId);
+
+    await waitForSession(service, second.sessionId, (current) => current.candidates.length === 1);
+    await service.regenerateCandidate(second.sessionId);
+    const regenerated = await waitForSession(service, second.sessionId, (current) => current.candidates.length === 2);
 
     expect(regenerated.candidates).toHaveLength(2);
     expect(regenerated.candidates[0].candidateId).not.toBe(regenerated.candidates[1].candidateId);
@@ -144,6 +146,64 @@ describe("Generation preview workflow", () => {
       })
     ).rejects.toThrow();
   });
+
+  it("propagates source=fallback on candidates when model is not configured", async () => {
+    const project = await service.createProject({
+      title: "来源追踪",
+      premise: "主角每次做选择都会让时间线产生分裂。",
+      genre: "科幻悬疑",
+      targetWords: 500000,
+      plannedVolumes: 4,
+      endingType: "开放式结局",
+      workflowMode: "strict"
+    });
+
+    const started = await service.startGeneration({
+      projectId: project.manifest.projectId,
+      action: "generate-project-setup"
+    });
+    const session = await waitForSession(service, started.sessionId, (s) => s.candidates.length > 0);
+
+    // With no model configured, the candidate should carry source=fallback
+    expect(session.candidates[0].source).toBe("fallback");
+
+    // The trace should mention fallback
+    const modelTrace = session.trace.find((t) => t.phase === "model-running");
+    expect(modelTrace?.title).toContain("回退");
+  });
+
+  it("retains all candidate history across multiple regenerations", async () => {
+    const project = await service.createProject({
+      title: "历史保持",
+      premise: "在循环世界中主角尝试打破时间锁。",
+      genre: "奇幻",
+      targetWords: 400000,
+      plannedVolumes: 3,
+      endingType: "开放",
+      workflowMode: "strict"
+    });
+
+    const started = await service.startGeneration({
+      projectId: project.manifest.projectId,
+      action: "generate-project-setup"
+    });
+    await waitForSession(service, started.sessionId, (s) => s.candidates.length === 1);
+    await waitForIdle(service);
+
+    await service.regenerateCandidate(started.sessionId);
+    await waitForSession(service, started.sessionId, (s) => s.candidates.length === 2);
+    await waitForIdle(service);
+
+    await service.regenerateCandidate(started.sessionId);
+    const final = await waitForSession(service, started.sessionId, (s) => s.candidates.length === 3);
+
+    expect(final.candidates).toHaveLength(3);
+    // Each candidate should have a unique candidateId
+    const ids = new Set(final.candidates.map((c) => c.candidateId));
+    expect(ids.size).toBe(3);
+    // Version numbers should be sequential
+    expect(final.candidates.map((c) => c.versionNumber)).toEqual([1, 2, 3]);
+  });
 });
 
 async function waitForSession(
@@ -168,4 +228,16 @@ async function waitForSession(
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for preview session ${sessionId}`);
+}
+
+async function waitForIdle(service: WorkbenchService, timeoutMs = 5000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const dashboard = await service.getDashboardData();
+    if (!dashboard.activeJob) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for generation job to clear");
 }

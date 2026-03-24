@@ -9,6 +9,7 @@ import type {
   ArtifactEditorDocument,
   ArtifactRef,
   DashboardData,
+  ModelConnectionTestResult,
   ProjectSnapshot,
   SearchResult,
   WorkbenchSettings,
@@ -46,6 +47,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
   const [drawer, setDrawer] = useState<DrawerState>(null);
   const [projectForm, setProjectFormState] = useState(createProjectInputFromDefaults());
   const [modelProfileDraft, setModelProfileDraftState] = useState(DEFAULT_MODEL_PROFILE);
+  const [connectionTestResult, setConnectionTestResult] = useState<ModelConnectionTestResult | null>(null);
   const [settingsDraft, setSettingsDraftState] = useState(DEFAULT_WORKBENCH_SETTINGS);
   const [workflowDraft, setWorkflowDraftState] = useState<WorkflowDraftState>(defaultWorkflowDraft);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -69,6 +71,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
 
   const setModelProfileDraft = useCallback((updater: (current: typeof modelProfileDraft) => typeof modelProfileDraft) => {
     setModelProfileDraftState((current) => updater(current));
+    setConnectionTestResult(null);
   }, []);
 
   const setSettingsDraft = useCallback((updater: (current: typeof settingsDraft) => typeof settingsDraft) => {
@@ -112,6 +115,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
         setSelectedProject(resolvedProject);
         setSelectedProjectId(resolvedProject?.manifest.projectId ?? null);
         setModelProfileDraftState(data.modelProfile);
+        setConnectionTestResult(null);
         setSettingsDraftState(data.settings);
         setProjectFormState(buildProjectFormFromSettings(data.settings));
         setSelectedCorpusIds((current) => {
@@ -657,6 +661,23 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
     [api, pushNotice, refresh, selectedProject, setBusyFlag]
   );
 
+  const testModelProfileConnection = useCallback(async () => {
+    setBusyFlag("test-model-profile-connection", true);
+    setError(null);
+    try {
+      const result = await api.testModelProfileConnection(modelProfileDraft);
+      setConnectionTestResult(result);
+      if (result.ok) {
+        pushNotice("AI 连通性测试通过。");
+      }
+    } catch (testError) {
+      setConnectionTestResult(null);
+      setError(testError instanceof Error ? testError.message : String(testError));
+    } finally {
+      setBusyFlag("test-model-profile-connection", false);
+    }
+  }, [api, modelProfileDraft, pushNotice, setBusyFlag]);
+
   const saveModelProfile = useCallback(async () => {
     setBusyFlag("save-model-profile", true);
     setError(null);
@@ -752,6 +773,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
       updateDrawerDocument,
       saveDrawerDocument,
       exportProject,
+      testModelProfileConnection,
       saveModelProfile,
       saveWorkbenchSettings,
       resetPromptTemplate,
@@ -779,6 +801,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
       saveDrawerDocument,
       saveModelProfile,
       saveWorkbenchSettings,
+      testModelProfileConnection,
       selectProject,
       setActiveCandidateId,
       setActiveView,
@@ -809,6 +832,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
       drawer,
       projectForm,
       modelProfileDraft,
+      connectionTestResult,
       settingsDraft,
       workflowDraft,
       activeJob,

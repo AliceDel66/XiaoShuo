@@ -14,6 +14,8 @@ import type {
   ProjectSnapshot,
   StoryBible
 } from "../../shared/types";
+import type { AppliedPatch, MemoryPatch, StoryMemory } from "../../shared/memory-types";
+import { createEmptyStoryMemory } from "../../shared/memory-types";
 import {
   deepClone,
   ensureDir,
@@ -39,6 +41,7 @@ interface ProjectPaths {
   auditDir: string;
   exportDir: string;
   referenceDir: string;
+  memoryDir: string;
 }
 
 interface DraftEditorMetadata {
@@ -61,7 +64,8 @@ export class ProjectRepository {
       stateDir: join(root, "04-状态"),
       auditDir: join(root, "05-审计"),
       exportDir: join(root, "06-导出"),
-      referenceDir: join(root, "07-参考")
+      referenceDir: join(root, "07-参考"),
+      memoryDir: join(root, "08-记忆")
     };
   }
 
@@ -450,6 +454,65 @@ export class ProjectRepository {
 
   getReferenceDirectory(rootPath: string): string {
     return this.getPaths(rootPath).referenceDir;
+  }
+
+  getMemoryDirectory(rootPath: string): string {
+    return this.getPaths(rootPath).memoryDir;
+  }
+
+  // ── Story Memory persistence ─────────────
+
+  async loadStoryMemory(rootPath: string, projectId: string): Promise<StoryMemory> {
+    const paths = this.getPaths(rootPath);
+    const memoryPath = join(paths.memoryDir, "memory.yaml");
+    return readYaml<StoryMemory>(memoryPath, createEmptyStoryMemory(projectId));
+  }
+
+  async saveStoryMemory(rootPath: string, memory: StoryMemory): Promise<void> {
+    const paths = this.getPaths(rootPath);
+    await ensureDir(paths.memoryDir);
+    await writeYaml(join(paths.memoryDir, "memory.yaml"), memory);
+  }
+
+  async saveMemorySnapshot(rootPath: string, memory: StoryMemory): Promise<string> {
+    const paths = this.getPaths(rootPath);
+    const snapshotsDir = join(paths.memoryDir, "snapshots");
+    await ensureDir(snapshotsDir);
+    const snapshotPath = join(snapshotsDir, `memory-v${memory.version}.yaml`);
+    await writeYaml(snapshotPath, memory);
+    return snapshotPath;
+  }
+
+  async savePendingPatch(rootPath: string, patch: MemoryPatch): Promise<string> {
+    const paths = this.getPaths(rootPath);
+    const pendingDir = join(paths.memoryDir, "patches", "pending");
+    await ensureDir(pendingDir);
+    const patchPath = join(pendingDir, `patch-${patch.patchId}.yaml`);
+    await writeYaml(patchPath, patch);
+    return patchPath;
+  }
+
+  async loadPendingPatches(rootPath: string): Promise<MemoryPatch[]> {
+    const paths = this.getPaths(rootPath);
+    const pendingDir = join(paths.memoryDir, "patches", "pending");
+    const indexPath = join(pendingDir, "_index.yaml");
+    return readYaml<MemoryPatch[]>(indexPath, []);
+  }
+
+  async savePendingPatchIndex(rootPath: string, patches: MemoryPatch[]): Promise<void> {
+    const paths = this.getPaths(rootPath);
+    const pendingDir = join(paths.memoryDir, "patches", "pending");
+    await ensureDir(pendingDir);
+    await writeYaml(join(pendingDir, "_index.yaml"), patches);
+  }
+
+  async saveAppliedPatch(rootPath: string, appliedPatch: AppliedPatch): Promise<string> {
+    const paths = this.getPaths(rootPath);
+    const patchesDir = join(paths.memoryDir, "patches");
+    await ensureDir(patchesDir);
+    const patchPath = join(patchesDir, `patch-${appliedPatch.patch.patchId}.yaml`);
+    await writeYaml(patchPath, appliedPatch);
+    return patchPath;
   }
 }
 
