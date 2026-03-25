@@ -39,6 +39,23 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
     [chapters, selectedChapterKey]
   );
 
+  const previousChapterTail = useMemo(() => {
+    if (!selectedChapter || chapters.length === 0) return null;
+    const currentIndex = chapters.findIndex((ch) => ch.key === selectedChapter.key);
+    if (currentIndex <= 0) return null;
+    const prevChapter = chapters[currentIndex - 1];
+    const rawText = prevChapter.draftMarkdown;
+    if (!rawText || rawText.trim().length === 0) return null;
+    const lines = rawText.trimEnd().split("\n");
+    const tailLines = lines.slice(-8);
+    return {
+      title: prevChapter.title,
+      volumeNumber: prevChapter.volumeNumber,
+      chapterNumber: prevChapter.chapterNumber,
+      tailText: tailLines.join("\n")
+    };
+  }, [selectedChapter, chapters]);
+
   useEffect(() => {
     if (!selectedChapter) {
       setDocument(null);
@@ -207,6 +224,18 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
             {selectedChapter ? (
               document ? (
                 <>
+                  {previousChapterTail ? (
+                    <div className="mb-8 rounded-2xl border border-white/8 bg-[#141722]/80 p-5">
+                      <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                        <ChevronRight size={12} className="-rotate-180" />
+                        <span>上一章结尾 · 第 {previousChapterTail.volumeNumber} 卷 第 {previousChapterTail.chapterNumber} 章 · {previousChapterTail.title}</span>
+                      </div>
+                      <div className="relative">
+                        <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-[#141722]/80 to-transparent" />
+                        <pre className="whitespace-pre-wrap break-words pt-6 text-base leading-8 text-slate-400/80" style={{ fontSize: `${state.settingsDraft.editorPreferences.fontSize - 1}px` }}>{previousChapterTail.tailText}</pre>
+                      </div>
+                    </div>
+                  ) : null}
                   <input
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
@@ -223,6 +252,19 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
                   />
                 </>
               ) : (
+                <>
+                  {previousChapterTail ? (
+                    <div className="mb-8 rounded-2xl border border-white/8 bg-[#141722]/80 p-5">
+                      <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                        <ChevronRight size={12} className="-rotate-180" />
+                        <span>上一章结尾 · 第 {previousChapterTail.volumeNumber} 卷 第 {previousChapterTail.chapterNumber} 章 · {previousChapterTail.title}</span>
+                      </div>
+                      <div className="relative">
+                        <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-[#141722]/80 to-transparent" />
+                        <pre className="whitespace-pre-wrap break-words pt-6 text-base leading-8 text-slate-400/80" style={{ fontSize: `${state.settingsDraft.editorPreferences.fontSize - 1}px` }}>{previousChapterTail.tailText}</pre>
+                      </div>
+                    </div>
+                  ) : null}
                 <div className="rounded-[32px] border border-white/8 bg-[#141722] p-8">
                   <div className="text-3xl font-semibold text-white">{selectedChapter.title}</div>
                   <div className="mt-6 rounded-2xl border border-white/6 bg-[#0d1018] p-5">
@@ -283,6 +325,7 @@ export function EditorView({ state, actions }: WorkbenchHookResult) {
                     </div>
                   </div>
                 </div>
+                </>
               )
             ) : (
               <EmptyState title="没有可编辑内容" detail="先创建项目并生成章纲或草稿。" />

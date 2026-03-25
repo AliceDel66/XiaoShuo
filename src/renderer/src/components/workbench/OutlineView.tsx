@@ -22,6 +22,19 @@ export function OutlineView({ state, actions }: WorkbenchHookResult) {
   const [detail, setDetail] = useState<OutlinePacket | null>(null);
   const [saveMessage, setSaveMessage] = useState("选择节点后可编辑");
   const tree = useMemo(() => volumeOutlineTree(state.selectedProject), [state.selectedProject]);
+  const [collapsedVolumes, setCollapsedVolumes] = useState<Set<string>>(new Set());
+
+  function toggleVolume(volumeId: string) {
+    setCollapsedVolumes((prev) => {
+      const next = new Set(prev);
+      if (next.has(volumeId)) {
+        next.delete(volumeId);
+      } else {
+        next.add(volumeId);
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     const firstOutline = tree[0]?.chapters[0] ?? tree[0]?.volume ?? null;
@@ -90,12 +103,13 @@ export function OutlineView({ state, actions }: WorkbenchHookResult) {
             <EmptyState title="还没有卷纲/章纲" detail="先在控制台生成卷纲与章纲，这里会自动映射成结构树和剧情看板。" />
           ) : (
             tree.map(({ volume, chapters }) => {
-              const expanded = true;
+              const expanded = !collapsedVolumes.has(volume.id);
               return (
                 <div key={volume.id} className="mb-4">
                   <button
                     type="button"
-                    onClick={() => setSelectedOutlineId(volume.id)}
+                    onClick={() => toggleVolume(volume.id)}
+                    onDoubleClick={() => setSelectedOutlineId(volume.id)}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm transition",
                       selectedOutlineId === volume.id ? "bg-cyan-500/10 text-cyan-200" : "text-slate-300 hover:bg-white/5"
@@ -104,7 +118,7 @@ export function OutlineView({ state, actions }: WorkbenchHookResult) {
                     {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     <span className="truncate">{volume.title}</span>
                   </button>
-                  <div className="mt-1 space-y-1 pl-6">
+                  {expanded ? <div className="mt-1 space-y-1 pl-6">
                     {chapters.map((chapter) => (
                       <button
                         key={chapter.id}
@@ -121,7 +135,7 @@ export function OutlineView({ state, actions }: WorkbenchHookResult) {
                         <span className="truncate text-sm">{chapter.title}</span>
                       </button>
                     ))}
-                  </div>
+                  </div> : null}
                 </div>
               );
             })
