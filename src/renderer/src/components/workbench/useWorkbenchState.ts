@@ -493,17 +493,11 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
             ? {
                 ...current,
                 selectedProject: snapshot,
-                activePreviewSession: current.activePreviewSession
-                  ? {
-                      ...current.activePreviewSession,
-                      status: "confirmed",
-                      selectedCandidateId: candidateId
-                    }
-                  : null
+                activePreviewSession: null
               }
             : current
         );
-        setActiveCandidateId(candidateId);
+        setActiveCandidateId(null);
         setDrawer(null);
         pushNotice("候选版本已确认并写回正式文档。");
       } catch (confirmError) {

@@ -41,8 +41,9 @@ function VolumeChapterControls({ state, actions }: Pick<WorkbenchHookResult, "st
   );
 
   const volumePlanned = volumeOutline?.chapterCount ?? 0;
-  const remaining = volumePlanned > 0 ? volumePlanned - existingCount : 0;
-  const maxChapterCount = volumePlanned > 0 ? Math.max(1, remaining) : 30;
+  const remaining = volumePlanned > 0 ? Math.max(0, volumePlanned - existingCount) : 0;
+  // Allow larger batch sizes: cap at remaining if volume has a plan, otherwise allow up to 200
+  const maxChapterCount = volumePlanned > 0 ? Math.max(1, remaining) : 200;
 
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -89,8 +90,11 @@ function VolumeChapterInfo({ state }: Pick<WorkbenchHookResult, "state">) {
   return (
     <div className="text-xs text-slate-500">
       第 {state.workflowDraft.volumeNumber} 卷已有章纲 {existingCount} 章
-      {volumePlanned > 0 ? `（卷纲规定 ${volumePlanned} 章，剩余 ${Math.max(0, volumePlanned - existingCount)} 章）` : "（卷纲未指定章数）"}，
-      下次生成将从第 {existingCount + 1} 章开始
+      {volumePlanned > 0 ? `（卷纲规定 ${volumePlanned} 章，剩余 ${Math.max(0, volumePlanned - existingCount)} 章）` : "（卷纲未指定章数）"}。
+      下次生成将从第 {existingCount + 1} 章开始。
+      {volumePlanned > 0 && existingCount >= volumePlanned ? (
+        <span className="text-amber-400"> 已达到卷纲规定章数上限，如需继续请编辑卷纲调整 chapterCount。</span>
+      ) : null}
     </div>
   );
 }

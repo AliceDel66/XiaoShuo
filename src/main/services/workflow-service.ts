@@ -630,15 +630,19 @@ function buildPromptPayload(
         'JSON schema: {"world": [{"title": string, "summary": string, "rules": string[]}], "characters": [{"id": string, "name": string, "role": string, "goal": string, "conflict": string, "arc": string, "secrets": string[], "currentStatus": string}], "factions": [{"id": string, "name": string, "agenda": string, "resources": string[], "relationshipToProtagonist": string}], "items": [{"id": string, "name": string, "purpose": string, "owner": string, "status": string}], "timeline": [{"id": string, "timeLabel": string, "description": string, "relatedCharacters": string[], "chapterRef": string}], "foreshadows": [{"id": string, "clue": string, "plantedAt": string, "payoffPlan": string, "status": "open" | "paid-off" | "delayed"}]}'
       );
       break;
-    case "generate-volume-outline":
+    case "generate-volume-outline": {
+      const avgChapterWords = 4000;
+      const wordsPerVol = Math.ceil(snapshot.manifest.targetWords / Math.max(1, snapshot.manifest.plannedVolumes));
+      const suggestedChaptersPerVol = Math.max(10, Math.ceil(wordsPerVol / avgChapterWords));
       sections.push(
         '⚠️ 重要：每卷的 summary、goal、conflict 必须直接引用资料库中的角色名、势力名和主线矛盾，卷与卷之间必须形成因果递进关系。',
-        '⚠️ 重要：每卷必须明确指定 chapterCount（该卷计划的章节数），通常每卷 15-25 章，根据内容密度合理分配。',
+        `⚠️ 重要：每卷必须明确指定 chapterCount（该卷计划的章节数）。本项目总目标字数 ${snapshot.manifest.targetWords} 字、共 ${snapshot.manifest.plannedVolumes} 卷、平均每章约 ${avgChapterWords} 字，建议每卷约 ${suggestedChaptersPerVol} 章。请根据各卷内容密度合理调整，但总量应与目标字数匹配。`,
         `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
         `资料库: ${JSON.stringify(snapshot.storyBible)}`,
         'JSON schema: [{"id": string, "level": "volume", "title": string, "summary": string, "goal": string, "conflict": string, "hook": string, "sceneCount": number, "chapterCount": number, "dependencies": string[], "references": [{"type": "project" | "corpus", "id": string, "title": string, "note": string}], "children": string[], "volumeNumber": number}]'
       );
       break;
+    }
     case "generate-chapter-outline": {
       const targetVolNumber = input.volumeNumber ?? 1;
       const targetVolumeOutline = snapshot.outlines.find((o) => o.level === "volume" && o.volumeNumber === targetVolNumber);
@@ -662,17 +666,72 @@ function buildPromptPayload(
       break;
     }
     case "write-scene":
-    case "write-chapter":
+    case "write-chapter": {
+      // Build continuity context from previous chapters
+      const targetChapterNum = input.chapterNumber ?? snapshot.drafts.length + 1;
+      const targetVolNum = input.volumeNumber ?? 1;
+      const previousDraft = snapshot.drafts
+        .filter((d) => d.volumeNumber === targetVolNum && d.chapterNumber < targetChapterNum)
+        .sort((a, b) => b.chapterNumber - a.chapterNumber)[0];
+      const previousState = previousDraft
+        ? snapshot.chapterStates.find((s) => s.chapterId === previousDraft.id)
+        : snapshot.chapterStates.at(-1);
+      const previousEnding = previousDraft
+        ? excerpt(previousDraft.markdown, 1200).split("\n").slice(-20).join("\n")
+        : "";
+      const previousOutline = previousDraft
+        ? snapshot.outlines.find(
+            (o) => o.level === "chapter" && o.volumeNumber === targetVolNum && o.chapterNumber === previousDraft.chapterNumber
+          )
+        : null;
+
       sections.push(
         '⚠️ 重要：正文中所有角色必须使用资料库中的准确姓名，不得使用"主角""他/她"等代称开头。角色行为、能力、关系必须与资料库一致。如果章纲中有具体的冲突和钩子描述，必须在正文中体现。',
+        '⚠️ 衔接要求：本章开头必须自然承接上一章的结尾场景和情绪，不能出现断裂感。请注意以下衔接细节：',
+        '  - 时间连续性：上一章结尾的时间点/场景需要与本章开头吻合',
+        '  - 情绪延续：上一章结尾的气氛和情感基调应在本章开头延续并过渡',
+        '  - 线索呼应：上一章末尾的悬念/钩子应在本章前半段得到回应或推进',
+        '  - 角色状态：角色的位置、心理状态、已知信息必须与上一章结束时一致',
         `目标章纲: ${JSON.stringify(prepared.targetOutline ?? null)}`,
         `资料库: ${JSON.stringify(snapshot.storyBible)}`,
         `立项卡: ${JSON.stringify(snapshot.premiseCard)}`,
         `写作范围: ${input.scope ?? "chapter"}`,
-        `附加说明: ${input.notes ?? ""}`,
+        `附加说明: ${input.notes ?? ""}`
+      );
+
+      if (previousDraft && previousEnding) {
+        sections.push(
+          `上一章标题: ${previousDraft.title}（第${previousDraft.chapterNumber}章）`,
+          `上一章结尾内容（最后约1000字）:\n${previousEnding}`
+        );
+      }
+      if (previousOutline) {
+        sections.push(`上一章章纲: ${JSON.stringify({ title: previousOutline.title, goal: previousOutline.goal, conflict: previousOutline.conflict, hook: previousOutline.hook })}`);
+      }
+      if (previousState) {
+        sections.push(`上一章状态变化: ${JSON.stringify({
+          characterStates: previousState.characterStates,
+          openQuestions: previousState.openQuestions,
+          timelineEvents: previousState.timelineEvents.slice(-3),
+          foreshadowChanges: previousState.foreshadowChanges
+        })}`);
+      }
+      if (snapshot.drafts.length > 1) {
+        const recentDraftSummaries = snapshot.drafts
+          .filter((d) => d.volumeNumber === targetVolNum && d.chapterNumber < targetChapterNum)
+          .sort((a, b) => b.chapterNumber - a.chapterNumber)
+          .slice(0, 3)
+          .map((d) => ({ title: d.title, chapterNumber: d.chapterNumber, ending: excerpt(d.markdown, 300).split("\n").slice(-5).join("\n") }));
+        if (recentDraftSummaries.length > 0) {
+          sections.push(`最近章节摘要（用于保持连贯性）: ${JSON.stringify(recentDraftSummaries)}`);
+        }
+      }
+
+      sections.push(
         'JSON schema: {"id": string, "title": string, "chapterNumber": number, "volumeNumber": number, "scope": "scene" | "chapter", "markdown": string}'
       );
       break;
+    }
     case "update-chapter-state":
       sections.push(
         'JSON schema: {"chapterId": string, "chapterTitle": string, "characterStates": [{"target": string, "before": string, "after": string, "reason": string}], "timelineEvents": [{"id": string, "timeLabel": string, "description": string, "relatedCharacters": string[], "chapterRef": string}], "foreshadowChanges": [{"target": string, "before": string, "after": string, "reason": string}], "relationshipChanges": [{"target": string, "before": string, "after": string, "reason": string}], "locationChanges": [{"target": string, "before": string, "after": string, "reason": string}], "openQuestions": string[]}',

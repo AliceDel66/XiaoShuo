@@ -767,6 +767,9 @@ export function mockStoryBible(snapshot: ProjectSnapshot): StoryBible {
 }
 
 export function mockVolumeOutlines(snapshot: ProjectSnapshot): OutlinePacket[] {
+  const avgWordsPerChapter = 4000;
+  const wordsPerVolume = Math.ceil(snapshot.manifest.targetWords / Math.max(1, snapshot.manifest.plannedVolumes));
+  const estimatedChaptersPerVolume = Math.max(10, Math.ceil(wordsPerVolume / avgWordsPerChapter));
   return Array.from({ length: snapshot.manifest.plannedVolumes }, (_, index) => {
     const volumeNumber = index + 1;
     return {
@@ -777,8 +780,8 @@ export function mockVolumeOutlines(snapshot: ProjectSnapshot): OutlinePacket[] {
       goal: `解决第${volumeNumber}阶段的局部危机并取得新的主动权。`,
       conflict: "主角必须在资源不足、规则未知和敌对势力试探之间完成破局。",
       hook: "卷末揭示更大真相，并将上一卷的代价升级为下一卷的主线压力。",
-      sceneCount: 24,
-      chapterCount: 18,
+      sceneCount: estimatedChaptersPerVolume * 3,
+      chapterCount: estimatedChaptersPerVolume,
       dependencies: volumeNumber === 1 ? [] : [`volume-${String(volumeNumber - 1).padStart(2, "0")}`],
       references: [{ type: "project", id: snapshot.manifest.projectId, title: snapshot.manifest.title, note: "主项目主线" }],
       children: [],
