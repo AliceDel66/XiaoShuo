@@ -1,5 +1,7 @@
 import type {
   CreateProjectInput,
+  DramaBible,
+  DramaWorkflowAction,
   ExportFormat,
   ModelProfile,
   PromptTemplateMap,
@@ -213,4 +215,109 @@ export const EXPORT_FORMAT_LABELS: Record<ExportFormat, string> = {
   markdown: "Markdown",
   txt: "TXT",
   epub: "EPUB"
+};
+
+// ───────────────────────────────────────
+//  短剧 (Drama) 默认配置
+// ───────────────────────────────────────
+
+export const EMPTY_DRAMA_BIBLE: DramaBible = {
+  locations: [],
+  propsCostumes: [],
+  characters: [],
+  hooks: [],
+  worldSetting: "",
+  toneStyle: ""
+};
+
+export const DRAMA_WORKFLOW_ACTION_LABELS: Record<DramaWorkflowAction, string> = {
+  "generate-drama-setup": "生成短剧立项",
+  "generate-drama-bible": "生成剧本资料库",
+  "generate-drama-episode-outline": "生成分集大纲",
+  "write-drama-scene": "写剧本场景",
+  "generate-storyboard": "生成分镜表",
+  "generate-character-three-view": "生成人物三视图"
+};
+
+export const DRAMA_PROMPT_TEMPLATES: Record<DramaWorkflowAction, { systemTemplate: string; userTemplate: string }> = {
+  "generate-drama-setup": promptTemplate(
+    [
+      "你是一名资深短剧策划编辑，擅长分析短视频平台爆款短剧的核心钩子和节奏模型。",
+      "你需要基于用户提供的一句话构思和项目元信息（类型、集数、单集时长），生成一份完整的短剧立项卡。",
+      "要求：",
+      "1. 核心钩子必须在前3秒抓住观众（悬念/冲突/反转预告）。",
+      "2. 每集必须有至少一个反转或情绪高潮点。",
+      "3. 整剧要有清晰的「起承转合」节奏弧线。",
+      "4. 需考虑短剧的竖屏拍摄特性和观众注意力特点。",
+      "请输出严格 JSON，不要附带 Markdown 代码块或任何额外解释文字。"
+    ].join("\n"),
+    ["请完成短剧立项卡生成。", "{{payload}}"].join("\n")
+  ),
+  "generate-drama-bible": promptTemplate(
+    [
+      "你是一名专业的短剧世界观架构师和剧本资料库设计师。",
+      "请基于已有的短剧立项卡，生成一份完整的剧本资料库（Drama Bible）。",
+      "必须包含以下维度：",
+      "1. 场地规划（Locations）：每个场景的氛围、灯光建议、出现集数。",
+      "2. 服化道设定（Props & Costumes）：关键道具和服装设定，标明使用场景。",
+      "3. 核心人物卡：包含性格、口头禅、服装风格、外貌特征、目标、冲突、弧线。",
+      "4. 反转/钩子清单（Hooks）：每集的反转点和钩子设计，标明类型和状态。",
+      "5. 世界观设定和基调风格描述。",
+      "请输出严格 JSON，不要附带 Markdown 代码块或任何额外解释文字。"
+    ].join("\n"),
+    ["请根据项目资料生成短剧资料库。", "{{payload}}"].join("\n")
+  ),
+  "generate-drama-episode-outline": promptTemplate(
+    [
+      "你是一名资深短剧分集策划师，精通短剧的节奏控制和观众留存。",
+      "请基于剧本资料库和项目设定，为短剧生成分集大纲。",
+      "要求：",
+      "1. 每集必须有明确的核心冲突、情绪弧线和结尾钩子。",
+      "2. 前3集必须建立世界、角色和核心矛盾。",
+      "3. 中间集数需持续升级对手和赌注。",
+      "4. 结局集需收束所有伏笔。",
+      "5. 每集时长控制在2-5分钟的叙事量。",
+      "请输出严格 JSON 数组，不要附带 Markdown 代码块或额外解释。"
+    ].join("\n"),
+    ["请生成短剧分集大纲。", "{{payload}}"].join("\n")
+  ),
+  "write-drama-scene": promptTemplate(
+    [
+      "你是一名专业的短剧编剧，擅长写紧凑高效的短剧剧本。",
+      "请根据分集大纲和资料库，写出一集完整的剧本场景。",
+      "格式要求：",
+      "1. 使用标准剧本格式：场景标题（INT./EXT. 地点 - 时间）。",
+      "2. 角色对话标注角色名。",
+      "3. 动作/表情/镜头提示用括号标注。",
+      "4. 每个场景开头标注景别建议。",
+      "5. 对话必须简洁有力，每句不超过15字。",
+      "6. 结尾必须有反转或悬念钩子。",
+      "请输出严格 JSON，不要附带 Markdown 代码块或额外解释。"
+    ].join("\n"),
+    ["请写一集短剧剧本。", "{{payload}}"].join("\n")
+  ),
+  "generate-storyboard": promptTemplate(
+    [
+      "你是一名专业的短剧分镜师，擅长将剧本文本转化为拍摄可用的分镜表。",
+      "请将提供的剧本文本拆解为详细的分镜镜头表。",
+      "每个镜头需包含：",
+      "1. 景别：远景(extreme-wide)/全景(wide)/中景(medium)/近景(close)/特写(extreme-close)",
+      "2. 运镜方式：推(push)/拉(pull)/摇(pan)/移(tilt)/跟(track)/升降(crane)/固定(static)/手持(handheld)",
+      "3. 机位角度：平视/俯视/仰视/斜角等",
+      "4. 画面描述：具体的视觉内容",
+      "5. 对白内容",
+      "6. 动作指示",
+      "7. 音效/BGM 提示",
+      "8. 预估时长",
+      "请输出严格 JSON，不要附带 Markdown 代码块或额外解释。"
+    ].join("\n"),
+    ["请将剧本拆解为分镜表。", "{{payload}}"].join("\n")
+  ),
+  "generate-character-three-view": promptTemplate(
+    [
+      "你是一名专业的角色设计师，请根据人物设定生成人物的三视图描述Prompt。",
+      "需要为文生图模型提供精确的外貌描述，确保三视图风格一致。"
+    ].join("\n"),
+    ["角色设定：{{payload}}"].join("\n")
+  )
 };

@@ -96,6 +96,32 @@ export function registerIpc(service: WorkbenchService): void {
   ipcMain.handle("workbench:compactMemory", (_event, projectId: string) =>
     service.compactMemory(projectId)
   );
+
+  // Drama (短剧) IPC channels
+  ipcMain.handle("workbench:saveDramaBible", (_event, projectId: string, bible: Parameters<AppApi["saveDramaBible"]>[1]) =>
+    service.saveDramaBible(projectId, bible)
+  );
+  ipcMain.handle("workbench:getDramaBible", (_event, projectId: string) =>
+    service.getDramaBible(projectId)
+  );
+  ipcMain.handle("workbench:generateCharacterThreeView", (_event, projectId: string, characterId: string) =>
+    service.generateCharacterThreeView(projectId, characterId)
+  );
+  ipcMain.handle("workbench:getCharacterThreeViews", (_event, projectId: string, characterId: string) =>
+    service.getCharacterThreeViews(projectId, characterId)
+  );
+  ipcMain.handle("workbench:exportDramaAssets", (_event, input: Parameters<AppApi["exportDramaAssets"]>[0]) =>
+    service.exportDramaAssets(input)
+  );
+  ipcMain.handle("workbench:generateStoryboard", (_event, input: Parameters<AppApi["generateStoryboard"]>[0]) =>
+    service.generateStoryboard(input)
+  );
+  ipcMain.handle("workbench:getStoryboard", (_event, projectId: string, episodeId: string) =>
+    service.getStoryboard(projectId, episodeId)
+  );
+  ipcMain.handle("workbench:startDramaGeneration", (_event, input: Parameters<AppApi["startDramaGeneration"]>[0]) =>
+    service.startDramaGeneration(input)
+  );
 }
 
 export { generationEventChannel };

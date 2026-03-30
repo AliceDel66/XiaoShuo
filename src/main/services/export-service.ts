@@ -1,8 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import JSZip from "jszip";
-import type { ChapterDraft, ExportFormat, OutlinePacket, ProjectSnapshot } from "../../shared/types";
-import { ensureDir, stripMarkdown, writeText } from "./helpers";
+import type { ChapterDraft, DramaAssetExportInput, ExportFormat, OutlinePacket, ProjectSnapshot } from "../../shared/types";
+import { ensureDir, readYaml, stripMarkdown, writeText } from "./helpers";
 
 export class ExportService {
   async exportProject(snapshot: ProjectSnapshot, format: ExportFormat, exportDir: string): Promise<string> {
@@ -110,6 +110,143 @@ ${navPoints}
     const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
     await writeFile(outputPath, buffer);
     return outputPath;
+  }
+
+  async exportDramaAssets(snapshot: ProjectSnapshot, input: DramaAssetExportInput): Promise<string> {
+    const exportDir = join(snapshot.manifest.rootPath, "exports");
+    await ensureDir(exportDir);
+
+    if (input.format === "zip") {
+      return this.exportDramaZip(snapshot, input, exportDir);
+    }
+    if (input.format === "pdf") {
+      // PDF fallback: export as markdown for now
+      return this.exportDramaMarkdown(snapshot, input, exportDir);
+    }
+    // PNG: export individual images
+    return this.exportDramaPng(snapshot, input, exportDir);
+  }
+
+  private async exportDramaZip(
+    snapshot: ProjectSnapshot,
+    input: DramaAssetExportInput,
+    exportDir: string
+  ): Promise<string> {
+    const zip = new JSZip();
+
+    if (input.includeBible) {
+      try {
+        const bible = await readYaml(join(snapshot.manifest.rootPath, "drama-bible.yaml"), null);
+        if (bible) {
+          zip.file("drama-bible.json", JSON.stringify(bible, null, 2));
+        }
+      } catch { /* no bible */ }
+    }
+
+    if (input.includeStoryboard) {
+      const storyboardDir = join(snapshot.manifest.rootPath, "storyboards");
+      try {
+        const { readdir } = await import("node:fs/promises");
+        const files = await readdir(storyboardDir);
+        for (const file of files) {
+          if (file.endsWith(".yaml")) {
+            const data = await readYaml(join(storyboardDir, file), null);
+            zip.file(`storyboards/${file.replace(".yaml", ".json")}`, JSON.stringify(data, null, 2));
+          }
+        }
+      } catch { /* no storyboards */ }
+    }
+
+    // Add three-view images
+    const threeViewDir = join(snapshot.manifest.rootPath, "three-views");
+    try {
+      const { readdir } = await import("node:fs/promises");
+      const files = await readdir(threeViewDir);
+      for (const file of files) {
+        if (file.endsWith(".yaml")) {
+          const characterId = file.replace(".yaml", "");
+          if (!input.characterIds || input.characterIds.includes(characterId)) {
+            const data = await readYaml(join(threeViewDir, file), null);
+            zip.file(`three-views/${file.replace(".yaml", ".json")}`, JSON.stringify(data, null, 2));
+          }
+        }
+      }
+    } catch { /* no three views */ }
+
+    const outputPath = join(exportDir, `${safeBookName(snapshot)}-drama-assets.zip`);
+    const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    await writeFile(outputPath, buffer);
+    return outputPath;
+  }
+
+  private async exportDramaMarkdown(
+    snapshot: ProjectSnapshot,
+    _input: DramaAssetExportInput,
+    exportDir: string
+  ): Promise<string> {
+    const lines: string[] = [`# ${snapshot.manifest.title} - 短剧设定集`, ""];
+
+    try {
+      const bible = await readYaml(join(snapshot.manifest.rootPath, "drama-bible.yaml"), null);
+      if (bible && typeof bible === "object") {
+        const b = bible as Record<string, unknown>;
+        lines.push("## 世界观设定", String(b.worldSetting || ""), "");
+        lines.push("## 基调风格", String(b.toneStyle || ""), "");
+        if (Array.isArray(b.characters)) {
+          lines.push("## 人物", "");
+          for (const c of b.characters as Array<Record<string, unknown>>) {
+            lines.push(`### ${c.name}`, `- 角色：${c.role}`, `- 性格：${c.personality}`, `- 口头禅：${c.catchphrase}`, "");
+          }
+        }
+        if (Array.isArray(b.locations)) {
+          lines.push("## 场地", "");
+          for (const l of b.locations as Array<Record<string, unknown>>) {
+            lines.push(`### ${l.name}`, String(l.description || ""), "");
+          }
+        }
+      }
+    } catch { /* no bible */ }
+
+    const outputPath = join(exportDir, `${safeBookName(snapshot)}-drama-设定集.md`);
+    await writeText(outputPath, lines.join("\n"));
+    return outputPath;
+  }
+
+  private async exportDramaPng(
+    snapshot: ProjectSnapshot,
+    input: DramaAssetExportInput,
+    exportDir: string
+  ): Promise<string> {
+    const imgDir = join(exportDir, "character-images");
+    await ensureDir(imgDir);
+
+    const threeViewDir = join(snapshot.manifest.rootPath, "three-views");
+    try {
+      const { readdir } = await import("node:fs/promises");
+      const files = await readdir(threeViewDir);
+      for (const file of files) {
+        if (file.endsWith(".yaml")) {
+          const characterId = file.replace(".yaml", "");
+          if (!input.characterIds || input.characterIds.includes(characterId)) {
+            const data = await readYaml(join(threeViewDir, file), null) as Record<string, unknown> | null;
+            if (data?.images) {
+              const images = data.images as Record<string, string>;
+              for (const [view, dataUrl] of Object.entries(images)) {
+                if (dataUrl && dataUrl.startsWith("data:image")) {
+                  const base64 = dataUrl.split(",")[1];
+                  if (base64) {
+                    const buffer = Buffer.from(base64, "base64");
+                    await writeFile(join(imgDir, `${characterId}-${view}.png`), buffer);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch { /* no three views */ }
+
+    return imgDir;
   }
 }
 

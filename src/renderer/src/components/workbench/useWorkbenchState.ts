@@ -17,7 +17,7 @@ import type {
   WorkflowExecutionInput
 } from "@shared/types";
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { DrawerState, WorkbenchHookResult, WorkflowDraftState } from "./types";
+import type { DrawerState, WorkbenchHookResult, WorkbenchView, WorkflowDraftState } from "./types";
 import { buildProjectFormFromSettings, candidateFromSession, findMatchingChapter } from "./view-model";
 
 function defaultWorkflowDraft(): WorkflowDraftState {
@@ -34,7 +34,7 @@ export function useWorkbenchState(api: AppApi): WorkbenchHookResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<"dashboard" | "editor" | "outline" | "database" | "settings">(
+  const [activeView, setActiveView] = useState<WorkbenchView>(
     "dashboard"
   );
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);

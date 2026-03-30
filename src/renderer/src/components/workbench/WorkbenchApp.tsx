@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Camera,
   Database,
   PenTool,
   Settings,
@@ -11,6 +12,7 @@ import { DatabaseView } from "./DatabaseView";
 import { EditorView } from "./EditorView";
 import { OutlineView } from "./OutlineView";
 import { SettingsView } from "./SettingsView";
+import { DramaApp } from "../drama/DramaApp";
 import type { WorkbenchAppProps } from "./types";
 import { useWorkbenchState } from "./useWorkbenchState";
 import { NavButton, StatusPill } from "./ui";
@@ -22,6 +24,7 @@ const navItems = [
   { id: "editor", label: WORKBENCH_VIEW_LABELS.editor, icon: <PenTool size={22} /> },
   { id: "outline", label: WORKBENCH_VIEW_LABELS.outline, icon: <BookOpen size={22} /> },
   { id: "database", label: WORKBENCH_VIEW_LABELS.database, icon: <Database size={22} /> },
+  { id: "drama", label: WORKBENCH_VIEW_LABELS.drama, icon: <Camera size={22} /> },
   { id: "settings", label: WORKBENCH_VIEW_LABELS.settings, icon: <Settings size={22} /> }
 ] as const;
 
@@ -35,7 +38,7 @@ export function WorkbenchApp({ api }: WorkbenchAppProps) {
           N
         </div>
         <nav className="flex flex-1 flex-col gap-4">
-          {navItems.slice(0, 4).map((item) => (
+          {navItems.slice(0, 5).map((item) => (
             <NavButton
               key={item.id}
               active={state.activeView === item.id}
@@ -90,6 +93,8 @@ export function WorkbenchApp({ api }: WorkbenchAppProps) {
           <OutlineView state={state} actions={actions} />
         ) : state.activeView === "database" ? (
           <DatabaseView state={state} actions={actions} />
+        ) : state.activeView === "drama" ? (
+          <DramaApp api={api} projectId={state.selectedProject?.manifest.projectId ?? null} />
         ) : (
           <SettingsView state={state} actions={actions} />
         )}

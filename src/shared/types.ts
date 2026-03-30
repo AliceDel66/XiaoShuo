@@ -525,4 +525,162 @@ export interface AppApi {
   saveArtifactEdits: (document: ArtifactEditorDocument) => Promise<ProjectSnapshot>;
   createEmptyDraft: (projectId: string, volumeNumber: number, chapterNumber: number, chapterTitle: string) => Promise<ProjectSnapshot>;
   executeWorkflow: (input: WorkflowExecutionInput) => Promise<WorkflowResult>;
+
+  // Drama (短剧) APIs
+  saveDramaBible: (projectId: string, bible: DramaBible) => Promise<ProjectSnapshot>;
+  getDramaBible: (projectId: string) => Promise<DramaBible | null>;
+  generateCharacterThreeView: (projectId: string, characterId: string) => Promise<ThreeViewResult>;
+  getCharacterThreeViews: (projectId: string, characterId: string) => Promise<ThreeViewResult | null>;
+  exportDramaAssets: (input: DramaAssetExportInput) => Promise<string>;
+  generateStoryboard: (input: StoryboardGenerationInput) => Promise<StoryboardResult>;
+  getStoryboard: (projectId: string, episodeId: string) => Promise<StoryboardResult | null>;
+
+  // Drama workflow
+  startDramaGeneration: (input: DramaWorkflowInput) => Promise<{ jobId: string; sessionId: string }>;
+}
+
+// ───────────────────────────────────────
+//  短剧 (Drama) 类型定义
+// ───────────────────────────────────────
+
+export type DramaWorkflowAction =
+  | "generate-drama-setup"
+  | "generate-drama-bible"
+  | "generate-drama-episode-outline"
+  | "write-drama-scene"
+  | "generate-storyboard"
+  | "generate-character-three-view";
+
+/** 场地规划 */
+export interface DramaLocation {
+  id: string;
+  name: string;
+  description: string;
+  atmosphere: string;
+  lightingNotes: string;
+  episodes: string[];
+}
+
+/** 服化道设定 */
+export interface DramaPropCostume {
+  id: string;
+  name: string;
+  category: "prop" | "costume" | "makeup";
+  description: string;
+  owner: string;
+  scenes: string[];
+  imageUrl?: string;
+}
+
+/** 短剧人物卡 */
+export interface DramaCharacterCard {
+  id: string;
+  name: string;
+  role: string;
+  personality: string;
+  catchphrase: string;
+  costumeStyle: string;
+  appearance: string;
+  goal: string;
+  conflict: string;
+  arc: string;
+  secrets: string[];
+  currentStatus: string;
+  threeViewImages?: ThreeViewImages;
+}
+
+/** 人物三视图图片 */
+export interface ThreeViewImages {
+  front?: string;
+  side?: string;
+  back?: string;
+  generatedAt?: string;
+}
+
+/** 反转/钩子清单 */
+export interface DramaHook {
+  id: string;
+  episodeNumber: number;
+  hookType: "cliffhanger" | "reversal" | "reveal" | "foreshadow";
+  description: string;
+  payoffEpisode?: number;
+  status: "planted" | "triggered" | "paid-off";
+}
+
+/** 短剧资料库 (Drama Bible) */
+export interface DramaBible {
+  locations: DramaLocation[];
+  propsCostumes: DramaPropCostume[];
+  characters: DramaCharacterCard[];
+  hooks: DramaHook[];
+  worldSetting: string;
+  toneStyle: string;
+}
+
+/** 人物三视图生成结果 */
+export interface ThreeViewResult {
+  characterId: string;
+  characterName: string;
+  images: ThreeViewImages;
+  prompt: string;
+  generatedAt: string;
+}
+
+/** 景别 */
+export type ShotSize = "extreme-wide" | "wide" | "medium" | "close" | "extreme-close";
+
+/** 运镜方式 */
+export type CameraMovement = "push" | "pull" | "pan" | "tilt" | "track" | "crane" | "static" | "handheld";
+
+/** 分镜条目 */
+export interface StoryboardShot {
+  shotId: string;
+  shotNumber: number;
+  sceneRef: string;
+  shotSize: ShotSize;
+  cameraMovement: CameraMovement;
+  cameraAngle: string;
+  description: string;
+  dialogue: string;
+  actionNotes: string;
+  soundEffect: string;
+  bgm: string;
+  duration: string;
+  visualNotes: string;
+}
+
+/** 分镜表结果 */
+export interface StoryboardResult {
+  episodeId: string;
+  episodeTitle: string;
+  shots: StoryboardShot[];
+  totalDuration: string;
+  generatedAt: string;
+}
+
+/** 资产导出输入 */
+export interface DramaAssetExportInput {
+  projectId: string;
+  format: "png" | "zip" | "pdf";
+  characterIds?: string[];
+  includeStoryboard?: boolean;
+  includeBible?: boolean;
+}
+
+/** 分镜生成输入 */
+export interface StoryboardGenerationInput {
+  projectId: string;
+  episodeId: string;
+  scriptText: string;
+  notes?: string;
+}
+
+/** 短剧工作流输入 */
+export interface DramaWorkflowInput {
+  projectId: string;
+  action: DramaWorkflowAction;
+  episodeNumber?: number;
+  episodeTitle?: string;
+  notes?: string;
+  referenceCorpusIds?: string[];
 }

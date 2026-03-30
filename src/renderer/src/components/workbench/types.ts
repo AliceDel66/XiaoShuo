@@ -19,7 +19,7 @@ import type {
   WorkflowAction
 } from "@shared/types";
 
-export type WorkbenchView = "dashboard" | "editor" | "outline" | "database" | "settings";
+export type WorkbenchView = "dashboard" | "editor" | "outline" | "database" | "settings" | "drama";
 
 export type DrawerState =
   | { kind: "artifact"; document: ArtifactEditorDocument; error?: string | null }

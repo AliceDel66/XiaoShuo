@@ -34,7 +34,19 @@ const api: AppApi = {
   openArtifactEditor: (artifactRef) => ipcRenderer.invoke("workbench:openArtifactEditor", artifactRef),
   saveArtifactEdits: (document) => ipcRenderer.invoke("workbench:saveArtifactEdits", document),
   createEmptyDraft: (projectId, volumeNumber, chapterNumber, chapterTitle) =>
-    ipcRenderer.invoke("workbench:createEmptyDraft", projectId, volumeNumber, chapterNumber, chapterTitle)
+    ipcRenderer.invoke("workbench:createEmptyDraft", projectId, volumeNumber, chapterNumber, chapterTitle),
+
+  // Drama (短剧) APIs
+  saveDramaBible: (projectId, bible) => ipcRenderer.invoke("workbench:saveDramaBible", projectId, bible),
+  getDramaBible: (projectId) => ipcRenderer.invoke("workbench:getDramaBible", projectId),
+  generateCharacterThreeView: (projectId, characterId) =>
+    ipcRenderer.invoke("workbench:generateCharacterThreeView", projectId, characterId),
+  getCharacterThreeViews: (projectId, characterId) =>
+    ipcRenderer.invoke("workbench:getCharacterThreeViews", projectId, characterId),
+  exportDramaAssets: (input) => ipcRenderer.invoke("workbench:exportDramaAssets", input),
+  generateStoryboard: (input) => ipcRenderer.invoke("workbench:generateStoryboard", input),
+  getStoryboard: (projectId, episodeId) => ipcRenderer.invoke("workbench:getStoryboard", projectId, episodeId),
+  startDramaGeneration: (input) => ipcRenderer.invoke("workbench:startDramaGeneration", input)
 };
 
 contextBridge.exposeInMainWorld("workbench", api);

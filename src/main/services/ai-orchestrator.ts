@@ -14,8 +14,12 @@ import type {
   ProjectSnapshot,
   ReferenceCorpusManifest,
   StoryBible,
+  StoryboardGenerationInput,
+  StoryboardResult,
+  StoryboardShot,
   WorkflowExecutionInput
 } from "../../shared/types";
+import { DRAMA_PROMPT_TEMPLATES } from "../../shared/defaults";
 import { excerpt, nowIso, stripMarkdown } from "./helpers";
 
 export type ModelRole = "plannerModel" | "writerModel" | "auditorModel";
@@ -458,6 +462,40 @@ export class AiOrchestrator {
         latencyMs: Date.now() - startedAt
       };
     }
+  }
+
+  async generateDramaStoryboard(
+    input: StoryboardGenerationInput,
+    _profileOverride?: ModelProfile
+  ): Promise<StoryboardResult> {
+    const template = DRAMA_PROMPT_TEMPLATES["generate-storyboard"];
+    const userPrompt = template.userTemplate.replace("{{payload}}", JSON.stringify({
+      episodeId: input.episodeId,
+      scriptText: input.scriptText,
+      notes: input.notes
+    }));
+
+    const result = await this.executeJson<{ shots: StoryboardShot[]; totalDuration: string }>({
+      role: "plannerModel",
+      promptTrace: {
+        systemPrompt: template.systemTemplate,
+        userPrompt,
+        referenceContext: [],
+        projectContextSummary: []
+      },
+      fallback: () => ({
+        shots: mockStoryboardShots(input.scriptText),
+        totalDuration: "3:00"
+      })
+    });
+
+    return {
+      episodeId: input.episodeId,
+      episodeTitle: input.episodeId,
+      shots: result.data.shots,
+      totalDuration: result.data.totalDuration,
+      generatedAt: nowIso()
+    };
   }
 }
 
@@ -1085,4 +1123,26 @@ export function extractProtagonistName(premise: string): string | null {
     return nameMatch[1];
   }
   return null;
+}
+
+function mockStoryboardShots(scriptText: string): StoryboardShot[] {
+  const paragraphs = scriptText.split(/\n+/).filter((line) => line.trim().length > 0);
+  const shotSizes: Array<import("../../shared/types").ShotSize> = ["wide", "medium", "close", "extreme-close", "medium"];
+  const movements: Array<import("../../shared/types").CameraMovement> = ["static", "push", "pan", "track", "static"];
+
+  return paragraphs.slice(0, 10).map((para, index) => ({
+    shotId: nanoid(8),
+    shotNumber: index + 1,
+    sceneRef: `scene-${Math.floor(index / 3) + 1}`,
+    shotSize: shotSizes[index % shotSizes.length],
+    cameraMovement: movements[index % movements.length],
+    cameraAngle: index % 2 === 0 ? "平视" : "俯视",
+    description: para.slice(0, 80),
+    dialogue: para.includes("：") ? para.split("：").slice(1).join("：").slice(0, 50) : "",
+    actionNotes: "",
+    soundEffect: index === 0 ? "环境音" : "",
+    bgm: index === 0 ? "悬疑氛围BGM" : "",
+    duration: `${2 + (index % 3)}s`,
+    visualNotes: ""
+  }));
 }

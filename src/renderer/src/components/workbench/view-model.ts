@@ -27,7 +27,8 @@ export const WORKBENCH_VIEW_LABELS = {
   editor: "沉浸写作",
   outline: "大纲与时间轴",
   database: "资料库",
-  settings: "设置"
+  settings: "设置",
+  drama: "短剧工作台"
 } as const;
 
 export function buildProjectFormFromSettings(settings: WorkbenchSettings): CreateProjectInput {

@@ -3,12 +3,16 @@ import { join } from "node:path";
 import {
   DEFAULT_MODEL_PROFILE,
   DEFAULT_WORKBENCH_SETTINGS,
+  EMPTY_DRAMA_BIBLE,
   WORKFLOW_ACTION_LABELS
 } from "../../shared/defaults";
 import type {
   AppApi,
   ArtifactEditorDocument,
   DashboardData,
+  DramaAssetExportInput,
+  DramaBible,
+  DramaWorkflowInput,
   ExportProjectInput,
   GenerationEvent,
   ImportCorpusInput,
@@ -16,6 +20,9 @@ import type {
   PreviewSession,
   ProjectSnapshot,
   SearchCorpusInput,
+  StoryboardGenerationInput,
+  StoryboardResult,
+  ThreeViewResult,
   WorkbenchSettings,
   WorkflowExecutionInput
 } from "../../shared/types";
@@ -24,6 +31,7 @@ import { CorpusService } from "./corpus-service";
 import { ExportService } from "./export-service";
 import { deepClone, ensureDir, nowIso, readYaml, writeYaml } from "./helpers";
 import { GenerationCoordinator } from "./generation-coordinator";
+import { ImageGenerationService } from "./image-generation-service";
 import { LibraryDatabase } from "./library-database";
 import { PreviewSessionService } from "./preview-session-service";
 import { ProjectRepository } from "./project-repository";
@@ -49,6 +57,8 @@ export class WorkbenchService implements AppApi {
   private generationCoordinator!: GenerationCoordinator;
 
   private storyMemoryService!: StoryMemoryService;
+
+  private readonly imageGenerationService = new ImageGenerationService();
 
   private readonly modelProfilePath: string;
 
@@ -389,6 +399,96 @@ export class WorkbenchService implements AppApi {
     updatedProject.unresolvedWarnings = evaluateOutstandingWarnings(updatedProject);
     this.database.upsertProject(updatedProject.manifest);
     return updatedProject;
+  }
+
+  // ── Drama API methods ─────────────────────────
+
+  async saveDramaBible(projectId: string, bible: DramaBible): Promise<ProjectSnapshot> {
+    const snapshot = await this.getProject(projectId);
+    const biblePath = join(snapshot.manifest.rootPath, "drama-bible.yaml");
+    await writeYaml(biblePath, bible);
+    return this.getProject(projectId);
+  }
+
+  async getDramaBible(projectId: string): Promise<DramaBible | null> {
+    const snapshot = await this.getProject(projectId);
+    const biblePath = join(snapshot.manifest.rootPath, "drama-bible.yaml");
+    try {
+      return await readYaml(biblePath, EMPTY_DRAMA_BIBLE);
+    } catch {
+      return null;
+    }
+  }
+
+  async generateCharacterThreeView(projectId: string, characterId: string): Promise<ThreeViewResult> {
+    const bible = await this.getDramaBible(projectId);
+    if (!bible) throw new Error("Drama Bible not found");
+    const character = bible.characters.find((c) => c.id === characterId);
+    if (!character) throw new Error(`Character not found: ${characterId}`);
+    const result = await this.imageGenerationService.generateThreeView(character);
+
+    // Save the result back to the character
+    character.threeViewImages = result.images;
+    await this.saveDramaBible(projectId, bible);
+
+    // Save the three-view result to a separate file
+    const snapshot = await this.getProject(projectId);
+    const threeViewPath = join(snapshot.manifest.rootPath, "three-views", `${characterId}.yaml`);
+    await ensureDir(join(snapshot.manifest.rootPath, "three-views"));
+    await writeYaml(threeViewPath, result);
+
+    return result;
+  }
+
+  async getCharacterThreeViews(projectId: string, characterId: string): Promise<ThreeViewResult | null> {
+    const snapshot = await this.getProject(projectId);
+    const threeViewPath = join(snapshot.manifest.rootPath, "three-views", `${characterId}.yaml`);
+    try {
+      return await readYaml(threeViewPath, null as unknown as ThreeViewResult);
+    } catch {
+      return null;
+    }
+  }
+
+  async exportDramaAssets(input: DramaAssetExportInput): Promise<string> {
+    const snapshot = await this.getProject(input.projectId);
+    return this.exportService.exportDramaAssets(snapshot, input);
+  }
+
+  async generateStoryboard(input: StoryboardGenerationInput): Promise<StoryboardResult> {
+    const profile = await this.getModelProfileInternal();
+    const result = await this.aiOrchestrator.generateDramaStoryboard(input, profile);
+
+    // Save the storyboard
+    const snapshot = await this.getProject(input.projectId);
+    const storyboardDir = join(snapshot.manifest.rootPath, "storyboards");
+    await ensureDir(storyboardDir);
+    await writeYaml(join(storyboardDir, `${input.episodeId}.yaml`), result);
+
+    return result;
+  }
+
+  async getStoryboard(projectId: string, episodeId: string): Promise<StoryboardResult | null> {
+    const snapshot = await this.getProject(projectId);
+    const storyboardPath = join(snapshot.manifest.rootPath, "storyboards", `${episodeId}.yaml`);
+    try {
+      return await readYaml(storyboardPath, null as unknown as StoryboardResult);
+    } catch {
+      return null;
+    }
+  }
+
+  async startDramaGeneration(input: DramaWorkflowInput): Promise<{ jobId: string; sessionId: string }> {
+    // Convert drama workflow input to standard workflow input for the coordinator
+    const workflowInput: WorkflowExecutionInput = {
+      projectId: input.projectId,
+      action: input.action as unknown as WorkflowExecutionInput["action"],
+      chapterNumber: input.episodeNumber,
+      chapterTitle: input.episodeTitle,
+      notes: input.notes,
+      referenceCorpusIds: input.referenceCorpusIds
+    };
+    return this.startGeneration(workflowInput);
   }
 
   dispose(): void {
