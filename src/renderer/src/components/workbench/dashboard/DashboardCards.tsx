@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { PremiseCard } from "@shared/types";
 import type { WorkbenchHookResult } from "../types";
 import { WORKFLOW_ACTION_LABELS } from "../view-model";
+import { DEFAULT_GENRE_PRESETS } from "@shared/defaults";
 import {
   EmptyState,
   Field,
@@ -258,15 +259,33 @@ export function DashboardCards({ state, actions }: WorkbenchHookResult) {
                   />
                 </Field>
                 <Field label="类型">
-                  <Input
+                  <Select
                     value={state.projectForm.genre}
-                    onChange={(event) =>
-                      actions.setProjectForm((current) => ({
-                        ...current,
-                        genre: event.target.value
-                      }))
-                    }
-                  />
+                    onChange={(event) => {
+                      const selectedGenre = event.target.value;
+                      const preset = DEFAULT_GENRE_PRESETS.find((p) => p.defaults.genre === selectedGenre);
+                      if (preset) {
+                        actions.setProjectForm((current) => ({
+                          ...current,
+                          genre: preset.defaults.genre,
+                          targetWords: preset.defaults.targetWords,
+                          plannedVolumes: preset.defaults.plannedVolumes,
+                          endingType: preset.defaults.endingType
+                        }));
+                      } else {
+                        actions.setProjectForm((current) => ({
+                          ...current,
+                          genre: selectedGenre
+                        }));
+                      }
+                    }}
+                  >
+                    {DEFAULT_GENRE_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.defaults.genre}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </Select>
                 </Field>
               </div>
               <div className="grid grid-cols-3 gap-4">

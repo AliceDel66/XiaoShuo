@@ -17,28 +17,23 @@ import type {
   AppliedPatch,
   AssembledMemoryContext,
   CharacterState,
-  ChapterMemorySnapshot,
   ChapterMemorySummary,
   ContextBudget,
   FactionState,
   ForeshadowState,
   ItemState,
-  LocationState,
-  MemoryLayer,
   MemoryPatch,
   PatchConflict,
   PatchHistoryFilter,
   PatchOperation,
   PatchValidationResult,
   PatchWarning,
-  RelationshipState,
   RetentionPolicy,
   StoryMemory,
   WritingPosition,
   WorldRule,
 } from "../../shared/memory-types";
 import {
-  createEmptyStoryMemory,
   DEFAULT_CONTEXT_BUDGETS,
   DEFAULT_RETENTION_POLICY,
 } from "../../shared/memory-types";
@@ -271,7 +266,7 @@ export class StoryMemoryService {
 
   // ── Bible-Sync: StoryBible → LongTermMemory ──
 
-  initFromBible(memory: StoryMemory, bible: StoryBible): MemoryPatch {
+  initFromBible(_memory: StoryMemory, bible: StoryBible): MemoryPatch {
     const operations: PatchOperation[] = [];
     const now = nowIso();
 

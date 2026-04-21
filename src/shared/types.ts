@@ -135,6 +135,24 @@ export interface WorkbenchSettings {
   exportPreferences: ExportPreferences;
 }
 
+/** 小说类型预设 */
+export interface GenrePreset {
+  id: string;
+  label: string;
+  description: string;
+  defaults: {
+    genre: string;
+    targetWords: number;
+    plannedVolumes: number;
+    endingType: string;
+  };
+  /** 写作要点指引：支持字符串或字符串数组（数组会在渲染时以换行拼接）。 */
+  premiseGuidelines: string | string[];
+  worldBuildingFocus?: string;
+  outlineGuidelines?: string;
+  writingGuidelines?: string;
+}
+
 export interface ProjectManifest {
   projectId: string;
   title: string;
@@ -537,6 +555,17 @@ export interface AppApi {
 
   // Drama workflow
   startDramaGeneration: (input: DramaWorkflowInput) => Promise<{ jobId: string; sessionId: string }>;
+
+  // Drama project CRUD (独立短剧项目)
+  getDramaDashboardData: () => Promise<DramaDashboardData>;
+  createDramaProject: (input: CreateDramaProjectInput) => Promise<DramaProjectSnapshot>;
+  getDramaProject: (projectId: string) => Promise<DramaProjectSnapshot>;
+  archiveDramaProject: (projectId: string) => Promise<DramaDashboardData>;
+  restoreDramaProject: (projectId: string) => Promise<DramaDashboardData>;
+  deleteDramaProject: (projectId: string) => Promise<DramaDashboardData>;
+  saveDramaSettings: (settings: DramaWorkbenchSettings) => Promise<DramaWorkbenchSettings>;
+  /** 测试短剧专属大模型连通性 */
+  testDramaModelProfileConnection: (profile: ModelProfile) => Promise<ModelConnectionTestResult>;
 }
 
 // ───────────────────────────────────────
@@ -683,4 +712,126 @@ export interface DramaWorkflowInput {
   episodeTitle?: string;
   notes?: string;
   referenceCorpusIds?: string[];
+}
+
+// ───────────────────────────────────────
+//  短剧独立项目系统
+// ───────────────────────────────────────
+
+/** 短剧类别 */
+export type DramaCategory =
+  | "霸总"
+  | "穿越"
+  | "重生"
+  | "战神"
+  | "甜宠"
+  | "虐恋"
+  | "悬疑"
+  | "宫斗"
+  | "都市逆袭"
+  | "复仇"
+  | "赘婿"
+  | "闪婚"
+  | "萌宝"
+  | "其他";
+
+/** 短剧类别模板 */
+export interface DramaCategoryTemplate {
+  category: DramaCategory;
+  label: string;
+  description: string;
+  defaultEpisodes: number;
+  defaultEpisodeDuration: string;
+  samplePremise: string;
+  typicalHooks: string[];
+}
+
+/** 短剧工作流阶段 */
+export type DramaWorkflowStage =
+  | "initiative"
+  | "bible"
+  | "episode-outline"
+  | "scripting"
+  | "storyboard"
+  | "export";
+
+/** 创建短剧项目输入 */
+export interface CreateDramaProjectInput {
+  title: string;
+  premise: string;
+  category: DramaCategory;
+  totalEpisodes: number;
+  episodeDuration: string;
+  toneStyle: string;
+  targetAudience: string;
+  rootDirectory?: string;
+}
+
+/** 短剧项目清单 */
+export interface DramaProjectManifest {
+  projectId: string;
+  title: string;
+  premise: string;
+  category: DramaCategory;
+  totalEpisodes: number;
+  episodeDuration: string;
+  toneStyle: string;
+  targetAudience: string;
+  currentStage: DramaWorkflowStage;
+  rootPath: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+}
+
+/** 短剧项目快照 */
+export interface DramaProjectSnapshot {
+  manifest: DramaProjectManifest;
+  bible: DramaBible | null;
+}
+
+/** 短剧仪表盘数据 */
+export interface DramaDashboardData {
+  modelProfile: ModelProfile;
+  settings: DramaWorkbenchSettings;
+  projects: DramaProjectManifest[];
+  archivedProjects: DramaProjectManifest[];
+  selectedProject: DramaProjectSnapshot | null;
+}
+
+/** 短剧项目默认值 */
+export interface DramaProjectDefaults {
+  category: DramaCategory;
+  totalEpisodes: number;
+  episodeDuration: string;
+  toneStyle: string;
+  targetAudience: string;
+  defaultRootDirectory: string;
+}
+
+/** 短剧提示词模板映射 */
+export type DramaPromptTemplateMap = Record<DramaWorkflowAction, PromptTemplate>;
+
+/** 短剧人物三视图图像生成配置 */
+export interface DramaImageModelConfig {
+  /** 文生图 API URL，兼容 OpenAI images/generations 协议 */
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  /** 预留：输出尺寸，默认 1024x1024 */
+  size?: string;
+}
+
+/** 短剧工作台设置 */
+export interface DramaWorkbenchSettings {
+  startupPreferences: {
+    reopenLastProject: boolean;
+    lastOpenedProjectId: string | null;
+  };
+  projectDefaults: DramaProjectDefaults;
+  promptTemplates: DramaPromptTemplateMap;
+  /** 短剧独立的大语言模型配置（与小说版块完全隔离） */
+  modelProfile: ModelProfile;
+  /** 短剧人物三视图专用文生图模型配置 */
+  imageModelProfile: DramaImageModelConfig;
 }

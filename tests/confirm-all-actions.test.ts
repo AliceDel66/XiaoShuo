@@ -28,7 +28,7 @@ describe("Confirm candidate for all workflow actions", () => {
       targetWords: 800000,
       plannedVolumes: 6,
       endingType: "开放式结局",
-      workflowMode: "relaxed"
+      workflowMode: "flexible"
     });
 
     // First confirm premise card

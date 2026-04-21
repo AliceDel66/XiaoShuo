@@ -19,7 +19,7 @@ import type {
   WorkflowAction
 } from "@shared/types";
 
-export type WorkbenchView = "dashboard" | "editor" | "outline" | "database" | "settings" | "drama";
+export type WorkbenchView = "dashboard" | "editor" | "outline" | "database" | "settings";
 
 export type DrawerState =
   | { kind: "artifact"; document: ArtifactEditorDocument; error?: string | null }
@@ -138,6 +138,7 @@ export interface WorkbenchHookResult {
 
 export interface WorkbenchAppProps {
   api: AppApi;
+  onSwitchMode?: () => void;
 }
 
 export function isStoryBibleCategory(category: DatabaseCategoryKey, bible: StoryBible | null): boolean {

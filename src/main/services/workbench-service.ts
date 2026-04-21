@@ -1,17 +1,29 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { nanoid } from "nanoid";
 import {
+  DEFAULT_DRAMA_IMAGE_MODEL_CONFIG,
+  DEFAULT_DRAMA_MODEL_PROFILE,
   DEFAULT_MODEL_PROFILE,
   DEFAULT_WORKBENCH_SETTINGS,
+  DEFAULT_DRAMA_WORKBENCH_SETTINGS,
   EMPTY_DRAMA_BIBLE,
-  WORKFLOW_ACTION_LABELS
+  WORKFLOW_ACTION_LABELS,
+  DRAMA_WORKFLOW_ACTION_LABELS
 } from "../../shared/defaults";
 import type {
   AppApi,
   ArtifactEditorDocument,
+  CreateDramaProjectInput,
   DashboardData,
   DramaAssetExportInput,
   DramaBible,
+  DramaDashboardData,
+  DramaImageModelConfig,
+  DramaProjectManifest,
+  DramaProjectSnapshot,
+  DramaWorkbenchSettings,
+  DramaWorkflowAction,
   DramaWorkflowInput,
   ExportProjectInput,
   GenerationEvent,
@@ -29,7 +41,7 @@ import type {
 import { AiOrchestrator, type FallbackPolicy } from "./ai-orchestrator";
 import { CorpusService } from "./corpus-service";
 import { ExportService } from "./export-service";
-import { deepClone, ensureDir, nowIso, readYaml, writeYaml } from "./helpers";
+import { deepClone, ensureDir, nowIso, readYaml, sanitizeFileName, slugifyId, writeYaml } from "./helpers";
 import { GenerationCoordinator } from "./generation-coordinator";
 import { ImageGenerationService } from "./image-generation-service";
 import { LibraryDatabase } from "./library-database";
@@ -64,6 +76,10 @@ export class WorkbenchService implements AppApi {
 
   private readonly workbenchSettingsPath: string;
 
+  private readonly dramaSettingsPath: string;
+
+  private readonly dramaProjectsDirectory: string;
+
   constructor(
     private readonly dataDirectory: string,
     private readonly defaultProjectsDirectory: string,
@@ -73,12 +89,15 @@ export class WorkbenchService implements AppApi {
     this.projectRepository = new ProjectRepository(defaultProjectsDirectory);
     this.modelProfilePath = join(dataDirectory, "settings", "model-profile.yaml");
     this.workbenchSettingsPath = join(dataDirectory, "settings", "workbench-settings.yaml");
+    this.dramaSettingsPath = join(dataDirectory, "settings", "drama-settings.yaml");
+    this.dramaProjectsDirectory = join(defaultProjectsDirectory, "..", "drama-projects");
     this.aiOrchestrator = new AiOrchestrator(() => this.getModelProfileInternal(), fallbackPolicy);
   }
 
   async init(): Promise<void> {
     await ensureDir(this.dataDirectory);
     await mkdir(this.defaultProjectsDirectory, { recursive: true });
+    await mkdir(this.dramaProjectsDirectory, { recursive: true });
     this.database = new LibraryDatabase(join(this.dataDirectory, "library.sqlite"));
     this.workflowService = new WorkflowService(this.projectRepository, this.aiOrchestrator, this.exportService);
     this.storyMemoryService = new StoryMemoryService(this.projectRepository);
@@ -93,6 +112,8 @@ export class WorkbenchService implements AppApi {
     );
     await this.saveModelProfile(await this.getModelProfileInternal());
     await this.saveWorkbenchSettings(await this.getWorkbenchSettingsInternal());
+    // 初始化短剧设置（确保文件存在并配置文生图服务）。
+    await this.saveDramaSettings(await this.getDramaSettingsInternal());
     await this.corpusService.seedBuiltinCorpora();
   }
 
@@ -403,16 +424,36 @@ export class WorkbenchService implements AppApi {
 
   // ── Drama API methods ─────────────────────────
 
+  private getDramaProjectRootPath(projectId: string): string {
+    const dramaManifest = this.database.getDramaProjectManifest(projectId);
+    if (dramaManifest) return dramaManifest.rootPath;
+    // Fallback to novel project for backward compatibility
+    const novelManifest = this.database.getProjectManifest(projectId);
+    if (novelManifest) return novelManifest.rootPath;
+    throw new Error(`Project not found: ${projectId}`);
+  }
+
   async saveDramaBible(projectId: string, bible: DramaBible): Promise<ProjectSnapshot> {
-    const snapshot = await this.getProject(projectId);
-    const biblePath = join(snapshot.manifest.rootPath, "drama-bible.yaml");
+    const rootPath = this.getDramaProjectRootPath(projectId);
+    const biblePath = join(rootPath, "bible", "drama-bible.yaml");
+    await ensureDir(join(rootPath, "bible"));
     await writeYaml(biblePath, bible);
+    // Update manifest timestamp for drama projects
+    const dramaManifest = this.database.getDramaProjectManifest(projectId);
+    if (dramaManifest) {
+      const updated = { ...dramaManifest, updatedAt: nowIso() };
+      await writeYaml(join(rootPath, "manifest.yaml"), updated);
+      this.database.upsertDramaProject(updated);
+      // 短剧项目不共用 novel ProjectSnapshot 结构，返回一个兼容形态的占位快照。
+      return buildPlaceholderSnapshotForDrama(updated);
+    }
+    // 向后兼容：若传入的是小说项目 ID，还是返回小说快照。
     return this.getProject(projectId);
   }
 
   async getDramaBible(projectId: string): Promise<DramaBible | null> {
-    const snapshot = await this.getProject(projectId);
-    const biblePath = join(snapshot.manifest.rootPath, "drama-bible.yaml");
+    const rootPath = this.getDramaProjectRootPath(projectId);
+    const biblePath = join(rootPath, "bible", "drama-bible.yaml");
     try {
       return await readYaml(biblePath, EMPTY_DRAMA_BIBLE);
     } catch {
@@ -425,6 +466,21 @@ export class WorkbenchService implements AppApi {
     if (!bible) throw new Error("Drama Bible not found");
     const character = bible.characters.find((c) => c.id === characterId);
     if (!character) throw new Error(`Character not found: ${characterId}`);
+
+    // 使用短剧独立的文生图模型配置（若已填写）
+    const dramaSettings = await this.getDramaSettingsInternal();
+    const imageConfig = dramaSettings.imageModelProfile;
+    if (imageConfig.apiUrl && imageConfig.apiKey && imageConfig.model) {
+      this.imageGenerationService.configure({
+        provider: "openai",
+        apiUrl: imageConfig.apiUrl,
+        apiKey: imageConfig.apiKey,
+        model: imageConfig.model
+      });
+    } else {
+      this.imageGenerationService.configure(null);
+    }
+
     const result = await this.imageGenerationService.generateThreeView(character);
 
     // Save the result back to the character
@@ -432,17 +488,17 @@ export class WorkbenchService implements AppApi {
     await this.saveDramaBible(projectId, bible);
 
     // Save the three-view result to a separate file
-    const snapshot = await this.getProject(projectId);
-    const threeViewPath = join(snapshot.manifest.rootPath, "three-views", `${characterId}.yaml`);
-    await ensureDir(join(snapshot.manifest.rootPath, "three-views"));
+    const rootPath = this.getDramaProjectRootPath(projectId);
+    const threeViewPath = join(rootPath, "three-views", `${characterId}.yaml`);
+    await ensureDir(join(rootPath, "three-views"));
     await writeYaml(threeViewPath, result);
 
     return result;
   }
 
   async getCharacterThreeViews(projectId: string, characterId: string): Promise<ThreeViewResult | null> {
-    const snapshot = await this.getProject(projectId);
-    const threeViewPath = join(snapshot.manifest.rootPath, "three-views", `${characterId}.yaml`);
+    const rootPath = this.getDramaProjectRootPath(projectId);
+    const threeViewPath = join(rootPath, "three-views", `${characterId}.yaml`);
     try {
       return await readYaml(threeViewPath, null as unknown as ThreeViewResult);
     } catch {
@@ -451,17 +507,24 @@ export class WorkbenchService implements AppApi {
   }
 
   async exportDramaAssets(input: DramaAssetExportInput): Promise<string> {
-    const snapshot = await this.getProject(input.projectId);
-    return this.exportService.exportDramaAssets(snapshot, input);
+    const snapshot = await this.getProject(input.projectId).catch(() => null);
+    if (snapshot) return this.exportService.exportDramaAssets(snapshot, input);
+    // For drama-only projects, create a minimal snapshot
+    const rootPath = this.getDramaProjectRootPath(input.projectId);
+    return this.exportService.exportDramaAssets({ manifest: { rootPath } as ProjectSnapshot["manifest"], premiseCard: null, storyBible: null, outlines: [], drafts: [], chapterStates: [], audits: [], unresolvedWarnings: [] }, input);
   }
 
   async generateStoryboard(input: StoryboardGenerationInput): Promise<StoryboardResult> {
-    const profile = await this.getModelProfileInternal();
-    const result = await this.aiOrchestrator.generateDramaStoryboard(input, profile);
+    // 优先使用短剧版块的独立模型配置；若未填写则回退到全局 profile。
+    const dramaSettings = await this.getDramaSettingsInternal();
+    const profileForCall = isDramaModelProfileConfigured(dramaSettings.modelProfile)
+      ? dramaSettings.modelProfile
+      : await this.getModelProfileInternal();
+    const result = await this.aiOrchestrator.generateDramaStoryboard(input, profileForCall);
 
     // Save the storyboard
-    const snapshot = await this.getProject(input.projectId);
-    const storyboardDir = join(snapshot.manifest.rootPath, "storyboards");
+    const rootPath = this.getDramaProjectRootPath(input.projectId);
+    const storyboardDir = join(rootPath, "storyboards");
     await ensureDir(storyboardDir);
     await writeYaml(join(storyboardDir, `${input.episodeId}.yaml`), result);
 
@@ -469,8 +532,8 @@ export class WorkbenchService implements AppApi {
   }
 
   async getStoryboard(projectId: string, episodeId: string): Promise<StoryboardResult | null> {
-    const snapshot = await this.getProject(projectId);
-    const storyboardPath = join(snapshot.manifest.rootPath, "storyboards", `${episodeId}.yaml`);
+    const rootPath = this.getDramaProjectRootPath(projectId);
+    const storyboardPath = join(rootPath, "storyboards", `${episodeId}.yaml`);
     try {
       return await readYaml(storyboardPath, null as unknown as StoryboardResult);
     } catch {
@@ -489,6 +552,151 @@ export class WorkbenchService implements AppApi {
       referenceCorpusIds: input.referenceCorpusIds
     };
     return this.startGeneration(workflowInput);
+  }
+
+  // ── Drama project CRUD ────────────────────────
+
+  async getDramaDashboardData(): Promise<DramaDashboardData> {
+    const settings = await this.getDramaSettingsInternal();
+    const projects = this.database.listDramaProjects();
+    const archivedProjects = this.database.listArchivedDramaProjects();
+    const preferredProjectId =
+      settings.startupPreferences.reopenLastProject && settings.startupPreferences.lastOpenedProjectId
+        ? settings.startupPreferences.lastOpenedProjectId
+        : null;
+    const selectedManifest =
+      [...projects, ...archivedProjects].find((p) => p.projectId === preferredProjectId) ??
+      projects[0] ??
+      archivedProjects[0] ??
+      null;
+    const selectedProject = selectedManifest
+      ? await this.loadDramaProjectSnapshot(selectedManifest)
+      : null;
+    // 仪表盘提供的 modelProfile 优先提供狭窄无关的小说设置，方便前端 fallback。
+    return {
+      modelProfile: settings.modelProfile,
+      settings,
+      projects,
+      archivedProjects,
+      selectedProject
+    };
+  }
+
+  async createDramaProject(input: CreateDramaProjectInput): Promise<DramaProjectSnapshot> {
+    const settings = await this.getDramaSettingsInternal();
+    const createdAt = nowIso();
+    const projectId = slugifyId(`drama-${input.title}-${nanoid(6)}`);
+    const rootBase = input.rootDirectory || settings.projectDefaults.defaultRootDirectory || this.dramaProjectsDirectory;
+    const folderName = sanitizeFileName(`${input.title}-${projectId.slice(-6)}`);
+    const rootPath = join(rootBase, folderName);
+
+    await mkdir(rootPath, { recursive: true });
+    await ensureDir(join(rootPath, "bible"));
+    await ensureDir(join(rootPath, "episodes"));
+    await ensureDir(join(rootPath, "storyboards"));
+    await ensureDir(join(rootPath, "three-views"));
+    await ensureDir(join(rootPath, "export"));
+
+    const manifest: DramaProjectManifest = {
+      projectId,
+      title: input.title,
+      premise: input.premise,
+      category: input.category,
+      totalEpisodes: input.totalEpisodes,
+      episodeDuration: input.episodeDuration,
+      toneStyle: input.toneStyle,
+      targetAudience: input.targetAudience,
+      currentStage: "initiative",
+      rootPath,
+      createdAt,
+      updatedAt: createdAt,
+      archivedAt: null
+    };
+
+    await writeYaml(join(rootPath, "manifest.yaml"), manifest);
+    await writeYaml(join(rootPath, "bible", "drama-bible.yaml"), EMPTY_DRAMA_BIBLE);
+    this.database.upsertDramaProject(manifest);
+
+    await this.saveDramaSettings({
+      ...settings,
+      startupPreferences: {
+        ...settings.startupPreferences,
+        lastOpenedProjectId: manifest.projectId
+      }
+    });
+
+    return this.loadDramaProjectSnapshot(manifest);
+  }
+
+  async getDramaProject(projectId: string): Promise<DramaProjectSnapshot> {
+    const manifest = this.database.getDramaProjectManifest(projectId);
+    if (!manifest) throw new Error(`Drama project not found: ${projectId}`);
+    return this.loadDramaProjectSnapshot(manifest);
+  }
+
+  async archiveDramaProject(projectId: string): Promise<DramaDashboardData> {
+    const manifest = this.database.getDramaProjectManifest(projectId);
+    if (!manifest) throw new Error(`Drama project not found: ${projectId}`);
+    const next: DramaProjectManifest = { ...manifest, archivedAt: nowIso(), updatedAt: nowIso() };
+    await writeYaml(join(manifest.rootPath, "manifest.yaml"), next);
+    this.database.upsertDramaProject(next);
+    return this.getDramaDashboardData();
+  }
+
+  async restoreDramaProject(projectId: string): Promise<DramaDashboardData> {
+    const manifest = this.database.getDramaProjectManifest(projectId);
+    if (!manifest) throw new Error(`Drama project not found: ${projectId}`);
+    const next: DramaProjectManifest = { ...manifest, archivedAt: null, updatedAt: nowIso() };
+    await writeYaml(join(manifest.rootPath, "manifest.yaml"), next);
+    this.database.upsertDramaProject(next);
+    return this.getDramaDashboardData();
+  }
+
+  async deleteDramaProject(projectId: string): Promise<DramaDashboardData> {
+    const manifest = this.database.getDramaProjectManifest(projectId);
+    if (!manifest) throw new Error(`Drama project not found: ${projectId}`);
+    this.database.deleteDramaProject(projectId);
+    return this.getDramaDashboardData();
+  }
+
+  async saveDramaSettings(settings: DramaWorkbenchSettings): Promise<DramaWorkbenchSettings> {
+    const normalized = normalizeDramaSettings(settings);
+    await writeYaml(this.dramaSettingsPath, normalized);
+    // 立即同步文生图配置
+    if (isDramaImageConfigConfigured(normalized.imageModelProfile)) {
+      this.imageGenerationService.configure({
+        provider: "openai",
+        apiUrl: normalized.imageModelProfile.apiUrl,
+        apiKey: normalized.imageModelProfile.apiKey,
+        model: normalized.imageModelProfile.model
+      });
+    } else {
+      this.imageGenerationService.configure(null);
+    }
+    return normalized;
+  }
+
+  async testDramaModelProfileConnection(profile: ModelProfile) {
+    return this.aiOrchestrator.testConnection(normalizeModelProfile(profile));
+  }
+
+  private async getDramaSettingsInternal(): Promise<DramaWorkbenchSettings> {
+    const settings = normalizeDramaSettings(
+      await readYaml(this.dramaSettingsPath, DEFAULT_DRAMA_WORKBENCH_SETTINGS)
+    );
+    if (!settings.projectDefaults.defaultRootDirectory) {
+      settings.projectDefaults.defaultRootDirectory = this.dramaProjectsDirectory;
+    }
+    return settings;
+  }
+
+  private async loadDramaProjectSnapshot(manifest: DramaProjectManifest): Promise<DramaProjectSnapshot> {
+    const biblePath = join(manifest.rootPath, "bible", "drama-bible.yaml");
+    let bible: DramaBible | null = null;
+    try {
+      bible = await readYaml(biblePath, EMPTY_DRAMA_BIBLE);
+    } catch { /* no bible yet */ }
+    return { manifest, bible };
   }
 
   dispose(): void {
@@ -667,4 +875,88 @@ function deriveReferenceQuery(snapshot: ProjectSnapshot, input: WorkflowExecutio
   ]
     .filter((item): item is string => Boolean(item && item.trim()))
     .join(" ");
+}
+
+function normalizeDramaSettings(settings: DramaWorkbenchSettings): DramaWorkbenchSettings {
+  return {
+    startupPreferences: {
+      ...DEFAULT_DRAMA_WORKBENCH_SETTINGS.startupPreferences,
+      ...settings.startupPreferences
+    },
+    projectDefaults: {
+      ...DEFAULT_DRAMA_WORKBENCH_SETTINGS.projectDefaults,
+      ...settings.projectDefaults
+    },
+    promptTemplates: normalizeDramaPromptTemplates(settings.promptTemplates),
+    modelProfile: normalizeModelProfile({
+      ...DEFAULT_DRAMA_MODEL_PROFILE,
+      ...(settings.modelProfile ?? {})
+    }),
+    imageModelProfile: {
+      ...DEFAULT_DRAMA_IMAGE_MODEL_CONFIG,
+      ...(settings.imageModelProfile ?? {})
+    }
+  };
+}
+
+function isDramaModelProfileConfigured(profile: ModelProfile): boolean {
+  return Boolean(
+    profile.baseUrl?.trim() &&
+      profile.apiKey?.trim() &&
+      (profile.plannerModel?.trim() || profile.writerModel?.trim() || profile.auditorModel?.trim())
+  );
+}
+
+function isDramaImageConfigConfigured(config: DramaImageModelConfig): boolean {
+  return Boolean(config.apiUrl?.trim() && config.apiKey?.trim() && config.model?.trim());
+}
+
+/**
+ * 短剧项目并没有 novel ProjectSnapshot 所需的 premiseCard / storyBible / outlines / drafts 等字段，
+ * 但 AppApi 的 saveDramaBible 仍声明返回 ProjectSnapshot（保持向后兼容）。
+ * 此处返回一个形状兼容的占位快照，避免类型崩溃以及 getProject 在短剧项目上误报。
+ */
+function buildPlaceholderSnapshotForDrama(manifest: DramaProjectManifest): ProjectSnapshot {
+  const placeholderManifest = {
+    projectId: manifest.projectId,
+    title: manifest.title,
+    premise: manifest.premise,
+    genre: `短剧-${manifest.category}`,
+    targetWords: 0,
+    plannedVolumes: 1,
+    endingType: manifest.toneStyle || "短剧结局",
+    workflowMode: "flexible" as const,
+    currentStage: "initiative" as const,
+    currentChapter: null,
+    rootPath: manifest.rootPath,
+    createdAt: manifest.createdAt,
+    updatedAt: manifest.updatedAt,
+    archivedAt: manifest.archivedAt ?? null
+  };
+  return {
+    manifest: placeholderManifest,
+    premiseCard: null,
+    storyBible: null,
+    outlines: [],
+    drafts: [],
+    chapterStates: [],
+    audits: [],
+    unresolvedWarnings: []
+  };
+}
+
+function normalizeDramaPromptTemplates(
+  templates: DramaWorkbenchSettings["promptTemplates"] | undefined
+): DramaWorkbenchSettings["promptTemplates"] {
+  const next = deepClone(DEFAULT_DRAMA_WORKBENCH_SETTINGS.promptTemplates);
+  for (const action of Object.keys(DRAMA_WORKFLOW_ACTION_LABELS) as DramaWorkflowAction[]) {
+    if (!templates?.[action]) continue;
+    next[action] = {
+      systemTemplate:
+        templates[action].systemTemplate?.trim() || DEFAULT_DRAMA_WORKBENCH_SETTINGS.promptTemplates[action].systemTemplate,
+      userTemplate:
+        templates[action].userTemplate?.trim() || DEFAULT_DRAMA_WORKBENCH_SETTINGS.promptTemplates[action].userTemplate
+    };
+  }
+  return next;
 }

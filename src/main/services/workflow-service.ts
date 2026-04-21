@@ -1,4 +1,6 @@
 import { DEFAULT_PROMPT_TEMPLATES, WORKFLOW_ACTION_LABELS } from "../../shared/defaults";
+import type { AssembledMemoryContext } from "../../shared/memory-types";
+import type { StoryMemoryService } from "./story-memory-service";
 import type {
   ArtifactEditorDocument,
   ArtifactFormat,
@@ -56,6 +58,10 @@ export class WorkflowService {
 
   setStoryMemoryService(service: StoryMemoryService): void {
     this.storyMemoryService = service;
+  }
+
+  getStoryMemoryService(): StoryMemoryService | null {
+    return this.storyMemoryService;
   }
 
   setPromptTemplates(templates: PromptTemplateMap): void {

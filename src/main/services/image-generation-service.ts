@@ -13,7 +13,7 @@ const DEFAULT_THREE_VIEW_SUFFIX =
 export class ImageGenerationService {
   private config: ImageGenerationConfig | null = null;
 
-  configure(config: ImageGenerationConfig): void {
+  configure(config: ImageGenerationConfig | null): void {
     this.config = config;
   }
 

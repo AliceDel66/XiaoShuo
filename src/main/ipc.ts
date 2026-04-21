@@ -122,6 +122,54 @@ export function registerIpc(service: WorkbenchService): void {
   ipcMain.handle("workbench:startDramaGeneration", (_event, input: Parameters<AppApi["startDramaGeneration"]>[0]) =>
     service.startDramaGeneration(input)
   );
+
+  // Drama project CRUD
+  ipcMain.handle("workbench:getDramaDashboardData", () => service.getDramaDashboardData());
+  ipcMain.handle("workbench:createDramaProject", (_event, input: Parameters<AppApi["createDramaProject"]>[0]) =>
+    service.createDramaProject(input)
+  );
+  ipcMain.handle("workbench:getDramaProject", (_event, projectId: string) =>
+    service.getDramaProject(projectId)
+  );
+  ipcMain.handle("workbench:archiveDramaProject", (_event, projectId: string) =>
+    service.archiveDramaProject(projectId)
+  );
+  ipcMain.handle("workbench:restoreDramaProject", (_event, projectId: string) =>
+    service.restoreDramaProject(projectId)
+  );
+  ipcMain.handle("workbench:deleteDramaProject", (_event, projectId: string) =>
+    service.deleteDramaProject(projectId)
+  );
+  ipcMain.handle("workbench:saveDramaSettings", (_event, settings: Parameters<AppApi["saveDramaSettings"]>[0]) =>
+    service.saveDramaSettings(settings)
+  );
+  ipcMain.handle(
+    "workbench:testDramaModelProfileConnection",
+    (_event, profile: Parameters<AppApi["testDramaModelProfileConnection"]>[0]) =>
+      service.testDramaModelProfileConnection(profile)
+  );
+
+  ipcMain.handle(
+    "auth:login",
+    async (_event, payload: { code: string; hwid: string; deviceName: string; clientVersion: string }) => {
+      const url = "http://auth.agentskill.asia/api/authorization-codes/login";
+      const body = JSON.stringify(payload);
+      const { default: http } = await import("node:http");
+      return new Promise<unknown>((resolve, reject) => {
+        const req = http.request(url, { method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } }, (res) => {
+          let data = "";
+          res.on("data", (chunk: Buffer) => { data += chunk.toString(); });
+          res.on("end", () => {
+            try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+            catch { resolve({ status: res.statusCode, body: data }); }
+          });
+        });
+        req.on("error", (err) => reject(err));
+        req.write(body);
+        req.end();
+      });
+    }
+  );
 }
 
 export { generationEventChannel };

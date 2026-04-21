@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { CorpusChunk, ProjectManifest, ReferenceCorpusManifest } from "../../shared/types";
+import type { CorpusChunk, DramaProjectManifest, ProjectManifest, ReferenceCorpusManifest } from "../../shared/types";
 
 export class LibraryDatabase {
   private readonly database: DatabaseSync;
@@ -31,6 +31,15 @@ export class LibraryDatabase {
         position INTEGER NOT NULL,
         vector_json TEXT,
         FOREIGN KEY (corpus_id) REFERENCES corpora(corpus_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS drama_projects (
+        project_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        root_path TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        archived_at TEXT,
+        manifest_json TEXT NOT NULL
       );
     `);
     this.ensureProjectArchiveColumn();
@@ -170,6 +179,56 @@ export class LibraryDatabase {
 
   deleteProject(projectId: string): void {
     const statement = this.database.prepare("DELETE FROM projects WHERE project_id = ?");
+    statement.run(projectId);
+  }
+
+  // ── Drama project CRUD ────────────────────────
+
+  upsertDramaProject(manifest: DramaProjectManifest): void {
+    const statement = this.database.prepare(`
+      INSERT INTO drama_projects (project_id, title, root_path, updated_at, archived_at, manifest_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET
+        title = excluded.title,
+        root_path = excluded.root_path,
+        updated_at = excluded.updated_at,
+        archived_at = excluded.archived_at,
+        manifest_json = excluded.manifest_json
+    `);
+    statement.run(
+      manifest.projectId,
+      manifest.title,
+      manifest.rootPath,
+      manifest.updatedAt,
+      manifest.archivedAt ?? null,
+      JSON.stringify(manifest)
+    );
+  }
+
+  listDramaProjects(): DramaProjectManifest[] {
+    const statement = this.database.prepare(
+      "SELECT manifest_json FROM drama_projects WHERE archived_at IS NULL ORDER BY updated_at DESC"
+    );
+    const rows = statement.all() as Array<{ manifest_json: string }>;
+    return rows.map((row) => JSON.parse(row.manifest_json) as DramaProjectManifest);
+  }
+
+  listArchivedDramaProjects(): DramaProjectManifest[] {
+    const statement = this.database.prepare(
+      "SELECT manifest_json FROM drama_projects WHERE archived_at IS NOT NULL ORDER BY archived_at DESC, updated_at DESC"
+    );
+    const rows = statement.all() as Array<{ manifest_json: string }>;
+    return rows.map((row) => JSON.parse(row.manifest_json) as DramaProjectManifest);
+  }
+
+  getDramaProjectManifest(projectId: string): DramaProjectManifest | null {
+    const statement = this.database.prepare("SELECT manifest_json FROM drama_projects WHERE project_id = ? LIMIT 1");
+    const row = statement.get(projectId) as { manifest_json: string } | undefined;
+    return row ? (JSON.parse(row.manifest_json) as DramaProjectManifest) : null;
+  }
+
+  deleteDramaProject(projectId: string): void {
+    const statement = this.database.prepare("DELETE FROM drama_projects WHERE project_id = ?");
     statement.run(projectId);
   }
 

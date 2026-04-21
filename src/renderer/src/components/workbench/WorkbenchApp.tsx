@@ -12,7 +12,6 @@ import { DatabaseView } from "./DatabaseView";
 import { EditorView } from "./EditorView";
 import { OutlineView } from "./OutlineView";
 import { SettingsView } from "./SettingsView";
-import { DramaApp } from "../drama/DramaApp";
 import type { WorkbenchAppProps } from "./types";
 import { useWorkbenchState } from "./useWorkbenchState";
 import { NavButton, StatusPill } from "./ui";
@@ -24,11 +23,10 @@ const navItems = [
   { id: "editor", label: WORKBENCH_VIEW_LABELS.editor, icon: <PenTool size={22} /> },
   { id: "outline", label: WORKBENCH_VIEW_LABELS.outline, icon: <BookOpen size={22} /> },
   { id: "database", label: WORKBENCH_VIEW_LABELS.database, icon: <Database size={22} /> },
-  { id: "drama", label: WORKBENCH_VIEW_LABELS.drama, icon: <Camera size={22} /> },
   { id: "settings", label: WORKBENCH_VIEW_LABELS.settings, icon: <Settings size={22} /> }
 ] as const;
 
-export function WorkbenchApp({ api }: WorkbenchAppProps) {
+export function WorkbenchApp({ api, onSwitchMode }: WorkbenchAppProps) {
   const { state, actions } = useWorkbenchState(api);
 
   return (
@@ -38,7 +36,7 @@ export function WorkbenchApp({ api }: WorkbenchAppProps) {
           N
         </div>
         <nav className="flex flex-1 flex-col gap-4">
-          {navItems.slice(0, 5).map((item) => (
+          {navItems.slice(0, 4).map((item) => (
             <NavButton
               key={item.id}
               active={state.activeView === item.id}
@@ -54,6 +52,16 @@ export function WorkbenchApp({ api }: WorkbenchAppProps) {
           icon={<Settings size={22} />}
           onClick={() => actions.setActiveView("settings")}
         />
+        {onSwitchMode ? (
+          <button
+            type="button"
+            onClick={onSwitchMode}
+            title="切换到短剧工作台"
+            className="mt-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-orange-500/30 bg-orange-500/10 text-orange-400 transition hover:bg-orange-500/20"
+          >
+            <Camera size={18} />
+          </button>
+        ) : null}
       </aside>
 
       <div className="relative flex min-w-0 flex-1 flex-col">
@@ -93,8 +101,6 @@ export function WorkbenchApp({ api }: WorkbenchAppProps) {
           <OutlineView state={state} actions={actions} />
         ) : state.activeView === "database" ? (
           <DatabaseView state={state} actions={actions} />
-        ) : state.activeView === "drama" ? (
-          <DramaApp api={api} projectId={state.selectedProject?.manifest.projectId ?? null} />
         ) : (
           <SettingsView state={state} actions={actions} />
         )}

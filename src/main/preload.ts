@@ -46,7 +46,23 @@ const api: AppApi = {
   exportDramaAssets: (input) => ipcRenderer.invoke("workbench:exportDramaAssets", input),
   generateStoryboard: (input) => ipcRenderer.invoke("workbench:generateStoryboard", input),
   getStoryboard: (projectId, episodeId) => ipcRenderer.invoke("workbench:getStoryboard", projectId, episodeId),
-  startDramaGeneration: (input) => ipcRenderer.invoke("workbench:startDramaGeneration", input)
+  startDramaGeneration: (input) => ipcRenderer.invoke("workbench:startDramaGeneration", input),
+
+  // Drama project CRUD
+  getDramaDashboardData: () => ipcRenderer.invoke("workbench:getDramaDashboardData"),
+  createDramaProject: (input) => ipcRenderer.invoke("workbench:createDramaProject", input),
+  getDramaProject: (projectId) => ipcRenderer.invoke("workbench:getDramaProject", projectId),
+  archiveDramaProject: (projectId) => ipcRenderer.invoke("workbench:archiveDramaProject", projectId),
+  restoreDramaProject: (projectId) => ipcRenderer.invoke("workbench:restoreDramaProject", projectId),
+  deleteDramaProject: (projectId) => ipcRenderer.invoke("workbench:deleteDramaProject", projectId),
+  saveDramaSettings: (settings) => ipcRenderer.invoke("workbench:saveDramaSettings", settings),
+  testDramaModelProfileConnection: (profile) =>
+    ipcRenderer.invoke("workbench:testDramaModelProfileConnection", profile)
 };
 
 contextBridge.exposeInMainWorld("workbench", api);
+
+contextBridge.exposeInMainWorld("authBridge", {
+  login: (payload: { code: string; hwid: string; deviceName: string; clientVersion: string }) =>
+    ipcRenderer.invoke("auth:login", payload)
+});

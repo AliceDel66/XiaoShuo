@@ -85,6 +85,8 @@ interface JsonCallOptions<T> {
   role: ModelRole;
   promptTrace: GenerationPromptTrace;
   fallback: () => T;
+  /** 若提供则覆盖默认 profileProvider 的结果，用于短剧独立模型配置 */
+  profileOverride?: ModelProfile;
 }
 
 interface ProbeOutcome {
@@ -249,7 +251,7 @@ export class AiOrchestrator {
   }
 
   async executeJson<T>(options: JsonCallOptions<T>): Promise<AiExecutionResult<T>> {
-    const profile = await this.getModelProfile();
+    const profile = options.profileOverride ?? (await this.getModelProfile());
     const model = profile[options.role];
     if (!profile.baseUrl || !profile.apiKey || !model) {
       return this.applyFallback("模型未配置 (缺少 baseUrl / apiKey / model)", options);
@@ -466,7 +468,7 @@ export class AiOrchestrator {
 
   async generateDramaStoryboard(
     input: StoryboardGenerationInput,
-    _profileOverride?: ModelProfile
+    profileOverride?: ModelProfile
   ): Promise<StoryboardResult> {
     const template = DRAMA_PROMPT_TEMPLATES["generate-storyboard"];
     const userPrompt = template.userTemplate.replace("{{payload}}", JSON.stringify({
@@ -477,6 +479,7 @@ export class AiOrchestrator {
 
     const result = await this.executeJson<{ shots: StoryboardShot[]; totalDuration: string }>({
       role: "plannerModel",
+      profileOverride,
       promptTrace: {
         systemPrompt: template.systemTemplate,
         userPrompt,

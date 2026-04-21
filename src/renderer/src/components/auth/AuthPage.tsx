@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 
-const API_BASE = "http://localhost:3000";
-
 interface AuthorizationCodeInfo {
   id: string;
   codePrefix: string;
@@ -101,29 +99,26 @@ export function AuthPage({ onAuthorized }: { onAuthorized: (result: AuthResult) 
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/authorization-codes/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: trimmed,
-          hwid,
-          deviceName: getDeviceName(),
-          clientVersion: "0.1.0"
-        })
-      });
+      const authBridge = (window as unknown as { authBridge: { login: (p: Record<string, string>) => Promise<{ status: number; body: unknown }> } }).authBridge;
+      const { status, body: data } = await authBridge.login({
+        code: trimmed,
+        hwid,
+        deviceName: getDeviceName(),
+        clientVersion: "0.1.0"
+      }) as { status: number; body: Record<string, unknown> };
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        const errorCode = data.error?.code ?? data.code ?? "";
-        const message = ERROR_MESSAGES[errorCode] ?? data.error?.message ?? data.message ?? "激活失败，请稍后重试";
-        setError(message);
+      if (status !== 200 || !(data as Record<string, unknown>).success) {
+        const err = data.error as Record<string, unknown> | undefined;
+        const errorCode = (err?.code ?? (data as Record<string, unknown>).code ?? "") as string;
+        const message = ERROR_MESSAGES[errorCode] ?? (err?.message as string) ?? (data as Record<string, unknown>).message ?? "激活失败，请稍后重试";
+        setError(message as string);
         return;
       }
 
+      const payload = data.data as Record<string, unknown>;
       const result: AuthResult = {
-        token: data.data.token,
-        authorizationCode: data.data.authorizationCode
+        token: payload.token as string,
+        authorizationCode: payload.authorizationCode as AuthorizationCodeInfo
       };
 
       localStorage.setItem(AUTH_STORAGE_KEY, result.token);

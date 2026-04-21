@@ -5,7 +5,7 @@
  * 拥有四层分层结构、MemoryPatch 变更通道及上下文装配能力。
  */
 
-import type { OutlinePacket, StateChangeEntry, WorkflowAction } from "./types";
+import type { OutlinePacket, StateChangeEntry } from "./types";
 
 // ═══════════════════════════════════════════════
 // 通用枚举 / 联合类型

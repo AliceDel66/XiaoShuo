@@ -39,4 +39,11 @@ declare module "lucide-react" {
   export const User: LucideIcon;
   export const Users: LucideIcon;
   export const Zap: LucideIcon;
+  export const Archive: LucideIcon;
+  export const ArchiveRestore: LucideIcon;
+  export const ChevronLeft: LucideIcon;
+  export const Clapperboard: LucideIcon;
+  export const FolderOpen: LucideIcon;
+  export const Save: LucideIcon;
+  export const X: LucideIcon;
 }
